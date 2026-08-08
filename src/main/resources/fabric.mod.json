@@ -1,0 +1,38 @@
+{
+	"schemaVersion": 1,
+	"id": "arowsmod",
+	"version": "${version}",
+	"name": "Arows Mod",
+	"description": "This is a mod made by Arowkey with various Stuff it!",
+	"authors": [
+		"Arowkey"
+	],
+	"contact": {
+		"homepage": "https://github.com/arowkey",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/arowsmod/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.arowkey.arowsmod.ArowsMod"
+		],
+		"client": [
+			"com.arowkey.arowsmod.client.ArowsModClient"
+		]
+	},
+	"mixins": [
+		"arowsmod.mixins.json",
+		{
+			"config": "arowsmod.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.19.3",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
