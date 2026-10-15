@@ -1,4 +1,4 @@
-# Arows Mod
+# ArowsMod
 
 ## Setup
 
