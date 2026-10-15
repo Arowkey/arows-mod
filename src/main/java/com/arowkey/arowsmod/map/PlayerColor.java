@@ -7,10 +7,14 @@ public final class PlayerColor {
 	}
 
 	public static String parse(String raw) {
-		if (raw == null || !raw.matches("#[0-9a-fA-F]{6}")) {
+		if (raw == null || raw.isEmpty()) {
 			return null;
 		}
-		return "#" + raw.substring(1).toLowerCase(Locale.ROOT);
+		String hex = raw.charAt(0) == '#' ? raw.substring(1) : raw;
+		if (!hex.matches("[0-9a-fA-F]{6}")) {
+			return null;
+		}
+		return "#" + hex.toLowerCase(Locale.ROOT);
 	}
 
 	public static int rgb(String color) {

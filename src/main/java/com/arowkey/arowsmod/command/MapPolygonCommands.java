@@ -155,7 +155,7 @@ public final class MapPolygonCommands {
 		if (existing == null) {
 			color = PlayerColor.parse(requestedColor);
 			if (color == null) {
-				source.sendFailure(Component.literal("First polygon for " + owner.name() + " needs a color, like #3dd68c."));
+				source.sendFailure(Component.literal("First polygon for " + owner.name() + " needs a color, like 3dd68c."));
 				return 0;
 			}
 			store.rememberColor(owner.id(), color);
@@ -179,7 +179,7 @@ public final class MapPolygonCommands {
 		}
 		String color = PlayerColor.parse(requestedColor);
 		if (color == null) {
-			source.sendFailure(Component.literal("Color must look like #3dd68c."));
+			source.sendFailure(Component.literal("Color must look like 3dd68c."));
 			return 0;
 		}
 		List<SavedPolygon> polygons = store.recolor(owner.id(), color);
