@@ -23,23 +23,25 @@ public class ArowsMod implements ModInitializer {
 			return;
 		}
 
-		Pl3xMap api = requirePl3xMap();
+		if (!FabricLoader.getInstance().isModLoaded("pl3xmap")) {
+			throw new IllegalStateException("ArowsMod requires the Pl3xMap mod. It is not loaded, so polygon markers cannot be registered.");
+		}
+
 		ArowsConfig config = ArowsConfig.load();
 		PolygonStore store = new PolygonStore();
 		store.load();
 		Pl3xMapBridge bridge = new Pl3xMapBridge(store, config);
-		bridge.register(api);
 		MapPolygonCommands.register(config, store, bridge);
-		LOGGER.info("ArowsMod map polygons are ready.");
+		bridge.registerWhenPl3xMapStarts();
+		LOGGER.info("ArowsMod map commands are ready. Map layers register after Pl3xMap enables.");
 	}
 
-	public static Pl3xMap requirePl3xMap() {
-		if (!FabricLoader.getInstance().isModLoaded("pl3xmap") || Pl3xMap.api() == null) {
-			throw new IllegalStateException(
-					"ArowsMod requires Pl3xMap on the Fabric server. Refusing to start because polygon markers would never be registered."
-			);
+	public static Pl3xMap pl3xMapApi() {
+		Pl3xMap api = Pl3xMap.api();
+		if (api == null) {
+			throw new IllegalStateException("Pl3xMap is loaded, but its API is not initialized yet.");
 		}
-		return Pl3xMap.api();
+		return api;
 	}
 
 	public static Identifier id(String path) {
