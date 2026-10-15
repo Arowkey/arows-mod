@@ -147,6 +147,10 @@ public final class PolygonStore {
 		return find(ownerId, name).isPresent();
 	}
 
+	public synchronized List<SavedPolygon> all() {
+		return List.copyOf(this.polygons);
+	}
+
 	public synchronized List<SavedPolygon> byOwner(UUID ownerId) {
 		List<SavedPolygon> owned = new ArrayList<>();
 		for (SavedPolygon polygon : this.polygons) {

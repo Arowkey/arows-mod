@@ -27,40 +27,34 @@ public final class ArowsConfig {
 
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
-	private final int maxPolygonsPerPlayer;
-	private final int strokeWeight;
-	private final double strokeOpacity;
-	private final double fillOpacity;
+	private volatile Snapshot snapshot;
 
-	private ArowsConfig(int maxPolygonsPerPlayer, int strokeWeight, double strokeOpacity, double fillOpacity) {
-		this.maxPolygonsPerPlayer = maxPolygonsPerPlayer;
-		this.strokeWeight = strokeWeight;
-		this.strokeOpacity = strokeOpacity;
-		this.fillOpacity = fillOpacity;
+	private ArowsConfig(Snapshot snapshot) {
+		this.snapshot = snapshot;
 	}
 
 	public int maxPolygonsPerPlayer() {
-		return this.maxPolygonsPerPlayer;
+		return this.snapshot.maxPolygonsPerPlayer;
 	}
 
 	public int strokeWeight() {
-		return this.strokeWeight;
+		return this.snapshot.strokeWeight;
 	}
 
 	public double strokeOpacity() {
-		return this.strokeOpacity;
+		return this.snapshot.strokeOpacity;
 	}
 
 	public double fillOpacity() {
-		return this.fillOpacity;
+		return this.snapshot.fillOpacity;
 	}
 
 	public int strokeColor(int rgb) {
-		return withOpacity(rgb, this.strokeOpacity);
+		return withOpacity(rgb, strokeOpacity());
 	}
 
 	public int fillColor(int rgb) {
-		return withOpacity(rgb, this.fillOpacity);
+		return withOpacity(rgb, fillOpacity());
 	}
 
 	public static int withOpacity(int rgb, double opacity) {
@@ -90,12 +84,44 @@ public final class ArowsConfig {
 			if (Files.notExists(path) || dirty) {
 				writeJson(path, json);
 			}
-			return new ArowsConfig(maxPolygons, strokeWeight, strokeOpacity, fillOpacity);
+			return new ArowsConfig(new Snapshot(maxPolygons, strokeWeight, strokeOpacity, fillOpacity));
 		} catch (RuntimeException exception) {
 			throw exception;
 		} catch (Exception exception) {
 			throw new IllegalStateException("Could not read ArowsMod config at " + path, exception);
 		}
+	}
+
+	public String reload() {
+		Path path = FabricLoader.getInstance().getConfigDir().resolve("arowsmod.json");
+		if (Files.notExists(path)) {
+			return path + " is missing. Kept the current config.";
+		}
+		try {
+			JsonElement parsed;
+			try (Reader reader = Files.newBufferedReader(path)) {
+				parsed = JsonParser.parseReader(reader);
+			}
+			if (parsed == null || !parsed.isJsonObject()) {
+				return path + " must be a JSON object. Kept the current config.";
+			}
+			JsonObject json = parsed.getAsJsonObject();
+			Snapshot next = new Snapshot(
+					readNonNegativeInt(json, MAX_POLYGONS_KEY, path),
+					readNonNegativeInt(json, STROKE_WEIGHT_KEY, path),
+					readOpacity(json, STROKE_OPACITY_KEY, path),
+					readOpacity(json, FILL_OPACITY_KEY, path)
+			);
+			this.snapshot = next;
+			return null;
+		} catch (RuntimeException exception) {
+			return exception.getMessage() + " Kept the current config.";
+		} catch (Exception exception) {
+			return "Could not read " + path + ": " + exception.getMessage() + " Kept the current config.";
+		}
+	}
+
+	private record Snapshot(int maxPolygonsPerPlayer, int strokeWeight, double strokeOpacity, double fillOpacity) {
 	}
 
 	private static boolean putDefault(JsonObject json, String key, JsonElement value) {

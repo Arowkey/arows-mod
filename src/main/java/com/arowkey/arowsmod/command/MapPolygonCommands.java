@@ -42,6 +42,9 @@ public final class MapPolygonCommands {
 			Pl3xMapBridge bridge
 	) {
 		dispatcher.register(Commands.literal("arowsmod")
+				.then(Commands.literal("reload")
+						.requires(MapPolygonCommands::isOperator)
+						.executes(context -> reload(context.getSource(), config, store, bridge)))
 				.then(Commands.literal("map")
 						.then(Commands.literal("polygon")
 								.requires(MapPolygonCommands::isOperator)
@@ -103,6 +106,31 @@ public final class MapPolygonCommands {
 
 	private static boolean isOperator(CommandSourceStack source) {
 		return source.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER);
+	}
+
+	private static int reload(CommandSourceStack source, ArowsConfig config, PolygonStore store, Pl3xMapBridge bridge) {
+		String failure = config.reload();
+		if (failure != null) {
+			source.sendFailure(Component.literal(failure));
+			return 0;
+		}
+		List<SavedPolygon> polygons = store.all();
+		int waiting = 0;
+		try {
+			for (SavedPolygon polygon : polygons) {
+				if (!bridge.show(polygon)) {
+					waiting++;
+				}
+			}
+		} catch (RuntimeException exception) {
+			ArowsMod.LOGGER.error("Pl3xMap could not restyle polygons after config reload", exception);
+			source.sendFailure(Component.literal("Reloaded the config, but Pl3xMap could not restyle the markers: " + exception.getMessage()));
+			return 0;
+		}
+		int pending = waiting;
+		int restyled = polygons.size() - pending;
+		source.sendSuccess(() -> Component.literal("Reloaded config. Restyled " + restyled + " polygon" + (restyled == 1 ? "" : "s") + (pending == 0 ? "." : "; " + pending + " will update when their world loads on Pl3xMap.")), false);
+		return 1;
 	}
 
 	private static Collection<NameAndId> profiles(com.mojang.brigadier.context.CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
