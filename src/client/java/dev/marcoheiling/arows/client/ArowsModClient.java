@@ -1,4 +1,4 @@
-package com.arowkey.arowsmod.client;
+package dev.marcoheiling.arows.client;
 
 import net.fabricmc.api.ClientModInitializer;
 

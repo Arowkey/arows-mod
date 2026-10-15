@@ -1,4 +1,4 @@
-package com.arowkey.arowsmod;
+package dev.marcoheiling.arows;
 
 import net.fabricmc.api.ModInitializer;
 
@@ -8,7 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class ArowsMod implements ModInitializer {
-	public static final String MOD_ID = "arowsmod";
+	public static final String MOD_ID = "arows";
 
 	// This logger is used to write text to the console and the log file.
 	// It is considered best practice to use your mod id as the logger's name.
@@ -21,7 +21,7 @@ public class ArowsMod implements ModInitializer {
 		// However, some things (like resources) may still be uninitialized.
 		// Proceed with mild caution.
 
-		LOGGER.info("Hello this is ArowsMod!");
+		LOGGER.info("Hello Fabric world!");
 	}
 
 	public static Identifier id(String path) {

@@ -1,4 +1,4 @@
-package com.arowkey.arowsmod.mixin;
+package dev.marcoheiling.arows.mixin;
 
 import net.minecraft.server.MinecraftServer;
 import org.spongepowered.asm.mixin.Mixin;

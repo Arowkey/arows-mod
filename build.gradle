@@ -18,7 +18,7 @@ loom {
 	splitEnvironmentSourceSets()
 
 	mods {
-		"arowsmod" {
+		"arows" {
 			sourceSet sourceSets.main
 			sourceSet sourceSets.client
 		}
