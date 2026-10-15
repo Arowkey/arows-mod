@@ -2,9 +2,11 @@ package com.arowkey.arowsmod.map;
 
 import com.arowkey.arowsmod.ArowsMod;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.pl3x.map.core.Pl3xMap;
 import net.pl3x.map.core.event.EventHandler;
 import net.pl3x.map.core.event.EventListener;
+import net.pl3x.map.core.event.server.Pl3xMapEnabledEvent;
 import net.pl3x.map.core.event.world.WorldLoadedEvent;
 import net.pl3x.map.core.markers.Point;
 import net.pl3x.map.core.markers.layer.Layer;
@@ -23,15 +25,47 @@ public final class Pl3xMapBridge implements EventListener {
 
 	private final PolygonStore store;
 	private final ArowsConfig config;
+	private boolean eventsRegistered;
+	private boolean tickRegistered;
+	private boolean syncQueued;
 
 	public Pl3xMapBridge(PolygonStore store, ArowsConfig config) {
 		this.store = store;
 		this.config = config;
 	}
 
-	public void register(Pl3xMap api) {
-		api.getEventRegistry().register(this);
-		ServerLifecycleEvents.SERVER_STARTED.register(server -> this.syncLoadedWorlds());
+	public void registerWhenPl3xMapStarts() {
+		// Registered from the main entrypoint, before Pl3xMap's dedicated-server initializer
+		// registers its own SERVER_STARTED listener, so this callback runs first.
+		ServerLifecycleEvents.SERVER_STARTED.register(server -> this.onServerStarted());
+	}
+
+	private void onServerStarted() {
+		Pl3xMap api = ArowsMod.pl3xMapApi();
+		if (!this.eventsRegistered) {
+			api.getEventRegistry().register(this);
+			this.eventsRegistered = true;
+		}
+		if (api.isEnabled()) {
+			this.syncLoadedWorlds();
+		}
+	}
+
+	@EventHandler
+	public void onEnabled(Pl3xMapEnabledEvent event) {
+		// enable() fires this event before loadWorlds(), so attach on the next tick.
+		this.syncQueued = true;
+		if (this.tickRegistered) {
+			return;
+		}
+		this.tickRegistered = true;
+		ServerTickEvents.END_SERVER_TICK.register(server -> {
+			if (!this.syncQueued) {
+				return;
+			}
+			this.syncQueued = false;
+			this.syncLoadedWorlds();
+		});
 	}
 
 	@EventHandler
@@ -40,13 +74,13 @@ public final class Pl3xMapBridge implements EventListener {
 	}
 
 	public void syncLoadedWorlds() {
-		for (World world : ArowsMod.requirePl3xMap().getWorldRegistry()) {
+		for (World world : ArowsMod.pl3xMapApi().getWorldRegistry()) {
 			this.attach(world);
 		}
 	}
 
 	public boolean show(SavedPolygon polygon) {
-		World world = ArowsMod.requirePl3xMap().getWorldRegistry().get(polygon.worldId());
+		World world = ArowsMod.pl3xMapApi().getWorldRegistry().get(polygon.worldId());
 		if (world == null) {
 			return false;
 		}
@@ -60,7 +94,7 @@ public final class Pl3xMapBridge implements EventListener {
 	}
 
 	public void hide(SavedPolygon polygon) {
-		World world = ArowsMod.requirePl3xMap().getWorldRegistry().get(polygon.worldId());
+		World world = ArowsMod.pl3xMapApi().getWorldRegistry().get(polygon.worldId());
 		if (world == null || !world.getLayerRegistry().has(LAYER_KEY)) {
 			return;
 		}
