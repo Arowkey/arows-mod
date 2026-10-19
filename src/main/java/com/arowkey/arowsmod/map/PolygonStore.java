@@ -1,11 +1,11 @@
 package com.arowkey.arowsmod.map;
 
+import com.arowkey.arowsmod.ArowsMod;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -30,15 +30,21 @@ public final class PolygonStore {
 	private final Map<UUID, String> colors = new HashMap<>();
 
 	public PolygonStore() {
-		this.path = FabricLoader.getInstance().getConfigDir().resolve("arowsmod").resolve("polygons.json");
+		// Fixed child of the config directory. Polygon names are never used as path segments.
+		this.path = ArowsConfig.configPath("arowsmod", "polygons.json");
 	}
 
+	/**
+	 * Reads polygons into temporary lists and swaps them in only after the whole file parses.
+	 * A bad file leaves the previous in-memory polygons and colors in place and is not rewritten.
+	 * In-progress drafts are not in this file.
+	 */
 	public synchronized void load() {
-		this.polygons.clear();
-		this.colors.clear();
 		if (Files.notExists(this.path)) {
 			return;
 		}
+		List<SavedPolygon> loadedPolygons = new ArrayList<>();
+		Map<UUID, String> loadedColors = new HashMap<>();
 		try (Reader reader = Files.newBufferedReader(this.path)) {
 			JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
 			if (root.has("players")) {
@@ -48,7 +54,7 @@ public final class PolygonStore {
 					if (color == null) {
 						throw new IllegalStateException(this.path + " has an invalid color for " + ownerId + ".");
 					}
-					this.colors.put(UUID.fromString(ownerId), color);
+					loadedColors.put(UUID.fromString(ownerId), color);
 				}
 			}
 			JsonArray array = root.getAsJsonArray("polygons");
@@ -67,8 +73,8 @@ public final class PolygonStore {
 				if (color == null) {
 					throw new IllegalStateException(this.path + " has an invalid color on polygon " + json.get("name") + ".");
 				}
-				this.colors.putIfAbsent(ownerId, color);
-				this.polygons.add(new SavedPolygon(
+				loadedColors.putIfAbsent(ownerId, color);
+				loadedPolygons.add(new SavedPolygon(
 						ownerId,
 						json.get("ownerName").getAsString(),
 						json.get("name").getAsString(),
@@ -78,10 +84,16 @@ public final class PolygonStore {
 				));
 			}
 		} catch (RuntimeException exception) {
+			ArowsMod.error("Could not read polygons.json.", exception);
 			throw exception;
 		} catch (Exception exception) {
+			ArowsMod.error("Could not read polygons.json.", exception);
 			throw new IllegalStateException("Could not read saved ArowsMod polygons at " + this.path, exception);
 		}
+		this.polygons.clear();
+		this.polygons.addAll(loadedPolygons);
+		this.colors.clear();
+		this.colors.putAll(loadedColors);
 	}
 
 	public synchronized Optional<String> colorOf(UUID ownerId) {
@@ -131,6 +143,14 @@ public final class PolygonStore {
 
 	public synchronized PolygonDraft removeDraft(UUID operatorId) {
 		return this.drafts.remove(operatorId);
+	}
+
+	public synchronized int polygonCount() {
+		return this.polygons.size();
+	}
+
+	public synchronized int colorCount() {
+		return this.colors.size();
 	}
 
 	public synchronized int countFinished(UUID ownerId) {
@@ -193,6 +213,15 @@ public final class PolygonStore {
 		return removed;
 	}
 
+	public synchronized void replace(SavedPolygon previous, SavedPolygon next) {
+		int index = this.polygons.indexOf(previous);
+		if (index < 0) {
+			throw new IllegalStateException("That polygon is no longer saved.");
+		}
+		this.polygons.set(index, next);
+		save();
+	}
+
 	private void save() {
 		JsonArray array = new JsonArray();
 		for (SavedPolygon polygon : this.polygons) {
@@ -221,6 +250,7 @@ public final class PolygonStore {
 		root.add("polygons", array);
 		try {
 			Files.createDirectories(this.path.getParent());
+			// Write a sibling temp file, then replace polygons.json. A failed write leaves the old file.
 			Path temporary = this.path.resolveSibling(this.path.getFileName() + ".tmp");
 			try (Writer writer = Files.newBufferedWriter(temporary)) {
 				GSON.toJson(root, writer);
@@ -231,6 +261,7 @@ public final class PolygonStore {
 				Files.move(temporary, this.path, StandardCopyOption.REPLACE_EXISTING);
 			}
 		} catch (IOException exception) {
+			ArowsMod.warn("Could not save polygons.json.", exception);
 			throw new IllegalStateException("Could not save ArowsMod polygons to " + this.path, exception);
 		}
 	}

@@ -6,6 +6,10 @@ plugins {
 version = project.mod_version
 group = project.maven_group
 
+base {
+	archivesName = "arowsmod-${project.minecraft_version}"
+}
+
 repositories {
 	// Pl3xMap publishes its API to the Modrinth Maven. See https://github.com/granny/Pl3xMap/wiki/Pl3xMap-API
 	exclusiveContent {

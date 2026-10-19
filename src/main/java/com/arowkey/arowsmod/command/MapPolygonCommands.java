@@ -16,14 +16,18 @@ import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.GameProfileArgument;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.Permissions;
 import net.minecraft.server.players.NameAndId;
 import net.pl3x.map.core.markers.Point;
 
+import java.net.URI;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 public final class MapPolygonCommands {
 	private MapPolygonCommands() {
@@ -33,6 +37,12 @@ public final class MapPolygonCommands {
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
 				register(dispatcher, registryAccess, config, store, bridge));
 	}
+
+	/**
+	 * Every polygon command and {@code /arowsmod reload} require operator permission
+	 * ({@link Permissions#COMMANDS_GAMEMASTER}, level 2). Start, add, finish, and cancel also need
+	 * a player position. List, remove, color, rename, help, and reload can run from the console.
+	 */
 
 	private static void register(
 			CommandDispatcher<CommandSourceStack> dispatcher,
@@ -48,6 +58,9 @@ public final class MapPolygonCommands {
 				.then(Commands.literal("map")
 						.then(Commands.literal("polygon")
 								.requires(MapPolygonCommands::isOperator)
+								.executes(context -> help(context.getSource()))
+								.then(Commands.literal("help")
+										.executes(context -> help(context.getSource())))
 								.then(Commands.literal("start")
 										.then(Commands.argument("player", GameProfileArgument.gameProfile())
 												.executes(context -> start(context.getSource(), store, profiles(context), null))
@@ -101,7 +114,32 @@ public final class MapPolygonCommands {
 																bridge,
 																profiles(context),
 																com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name")
-														))))))));
+														)))))
+								.then(Commands.literal("rename")
+										.then(Commands.argument("player", GameProfileArgument.gameProfile())
+												.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
+														.then(Commands.argument("new-name", com.mojang.brigadier.arguments.StringArgumentType.word())
+																.executes(context -> rename(
+																		context.getSource(),
+																		store,
+																		bridge,
+																		profiles(context),
+																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "new-name")
+																)))))))));
+	}
+
+	private static int help(CommandSourceStack source) {
+		Component link = Component.literal("https://github.com/Arowkey/arows-mod").withStyle(style -> style
+				.withClickEvent(new ClickEvent.OpenUrl(URI.create("https://github.com/Arowkey/arows-mod")))
+				.withUnderlined(true));
+		Component message = Component.literal("Operators draw Pl3xMap polygons for a player.\n"
+				+ "First polygon: /arowsmod map polygon start <player> <RRGGBB>, then add, then finish <name>.\n"
+				+ "Later: list, color, rename, remove, and cancel for the one in progress.\n"
+				+ "Colors are six hex digits with no #.\n"
+				+ "More detail: ").append(link);
+		source.sendSuccess(() -> message, false);
+		return 1;
 	}
 
 	private static boolean isOperator(CommandSourceStack source) {
@@ -111,25 +149,39 @@ public final class MapPolygonCommands {
 	private static int reload(CommandSourceStack source, ArowsConfig config, PolygonStore store, Pl3xMapBridge bridge) {
 		String failure = config.reload();
 		if (failure != null) {
+			ArowsMod.warn("Kept the current config. {}", failure);
 			source.sendFailure(Component.literal(failure));
 			return 0;
 		}
 		List<SavedPolygon> polygons = store.all();
-		int waiting = 0;
+		Set<String> waitingWorlds = new LinkedHashSet<>();
+		int restyled = 0;
 		try {
+			bridge.refreshLayerLabels();
 			for (SavedPolygon polygon : polygons) {
-				if (!bridge.show(polygon)) {
-					waiting++;
+				if (bridge.show(polygon)) {
+					restyled++;
+				} else {
+					waitingWorlds.add(polygon.worldId());
 				}
 			}
 		} catch (RuntimeException exception) {
-			ArowsMod.LOGGER.error("Pl3xMap could not restyle polygons after config reload", exception);
+			ArowsMod.warn("Could not restyle markers after config reload.", exception);
 			source.sendFailure(Component.literal("Reloaded the config, but Pl3xMap could not restyle the markers: " + exception.getMessage()));
 			return 0;
 		}
-		int pending = waiting;
-		int restyled = polygons.size() - pending;
-		source.sendSuccess(() -> Component.literal("Reloaded config. Restyled " + restyled + " polygon" + (restyled == 1 ? "" : "s") + (pending == 0 ? "." : "; " + pending + " will update when their world loads on Pl3xMap.")), false);
+		int pending = polygons.size() - restyled;
+		int restyledCount = restyled;
+		int pendingCount = pending;
+		ArowsMod.info("{} reloaded config. Restyled {} {} on layer {}.",
+				source.getTextName(),
+				restyledCount,
+				restyledCount == 1 ? "polygon" : "polygons",
+				config.layerName());
+		for (String worldId : waitingWorlds) {
+			ArowsMod.warn("World {} is not on Pl3xMap yet.", worldId);
+		}
+		source.sendSuccess(() -> Component.literal("Reloaded config. Restyled " + restyledCount + " polygon" + (restyledCount == 1 ? "" : "s") + (pendingCount == 0 ? "." : "; " + pendingCount + " will update when their world loads on Pl3xMap.")), false);
 		return 1;
 	}
 
@@ -183,24 +235,33 @@ public final class MapPolygonCommands {
 			return 0;
 		}
 		List<SavedPolygon> polygons = store.recolor(owner.id(), color);
-		int waiting = 0;
+		Set<String> waitingWorlds = new LinkedHashSet<>();
+		int restyled = 0;
 		try {
 			for (SavedPolygon polygon : polygons) {
-				if (!bridge.show(polygon)) {
-					waiting++;
+				if (bridge.show(polygon)) {
+					restyled++;
+				} else {
+					waitingWorlds.add(polygon.worldId());
 				}
 			}
 		} catch (RuntimeException exception) {
-			ArowsMod.LOGGER.error("Pl3xMap could not restyle polygons for {}", owner.name(), exception);
+			ArowsMod.warn("Could not restyle markers for {}.", owner.name(), exception);
+			logColorChanged(source, owner, polygons, 0);
 			source.sendFailure(Component.literal("Saved " + color + " for " + owner.name() + ", but Pl3xMap could not restyle the markers: " + exception.getMessage()));
 			return 0;
 		}
-		int pending = waiting;
-		int restyled = polygons.size() - pending;
-		if (pending > 0) {
-			source.sendSuccess(() -> Component.literal("Set " + owner.name() + " to " + color + ". Restyled " + restyled + " polygon" + (restyled == 1 ? "" : "s") + "; " + pending + " will update when their world loads on Pl3xMap."), false);
+		logColorChanged(source, owner, polygons, restyled);
+		for (String worldId : waitingWorlds) {
+			ArowsMod.warn("World {} is not on Pl3xMap yet.", worldId);
+		}
+		int pending = polygons.size() - restyled;
+		int restyledCount = restyled;
+		int pendingCount = pending;
+		if (pendingCount > 0) {
+			source.sendSuccess(() -> Component.literal("Set " + owner.name() + " to " + color + ". Restyled " + restyledCount + " polygon" + (restyledCount == 1 ? "" : "s") + "; " + pendingCount + " will update when their world loads on Pl3xMap."), false);
 		} else {
-			source.sendSuccess(() -> Component.literal("Set " + owner.name() + " to " + color + " and restyled " + restyled + " polygon" + (restyled == 1 ? "" : "s") + "."), false);
+			source.sendSuccess(() -> Component.literal("Set " + owner.name() + " to " + color + " and restyled " + restyledCount + " polygon" + (restyledCount == 1 ? "" : "s") + "."), false);
 		}
 		return 1;
 	}
@@ -261,20 +322,29 @@ public final class MapPolygonCommands {
 			return 0;
 		}
 		SavedPolygon polygon = new SavedPolygon(draft.ownerId(), draft.ownerName(), name, draft.worldId(), draft.color(), draft.points());
+		boolean shown;
 		try {
-			boolean shown = bridge.show(polygon);
+			shown = bridge.show(polygon);
+		} catch (RuntimeException exception) {
+			ArowsMod.warn("Could not register marker {} for {} in {}.", name, draft.ownerName(), draft.worldId(), exception);
+			source.sendFailure(Component.literal("Pl3xMap could not register this polygon: " + exception.getMessage()));
+			return 0;
+		}
+		try {
 			store.add(polygon);
 			store.removeDraft(operator.getUUID());
+			ArowsMod.info("{} created polygon {} for {} in {} ({} points).",
+					source.getTextName(), name, draft.ownerName(), draft.worldId(), polygon.points().size());
 			if (shown) {
 				source.sendSuccess(() -> Component.literal("Created " + name + " for " + draft.ownerName() + " on the ArowsMod map layer."), false);
 			} else {
 				source.sendSuccess(() -> Component.literal("Saved " + name + " for " + draft.ownerName() + ". Pl3xMap is not showing " + draft.worldId() + " yet; the marker will be registered when that world loads."), false);
-				ArowsMod.LOGGER.warn("Saved polygon {} for {} in {}, but Pl3xMap has not loaded that world yet.", name, draft.ownerName(), draft.worldId());
+				ArowsMod.warn("World {} is not on Pl3xMap yet.", draft.worldId());
 			}
 			return 1;
 		} catch (RuntimeException exception) {
-			ArowsMod.LOGGER.error("Pl3xMap rejected polygon {} for {}", name, draft.ownerName(), exception);
-			source.sendFailure(Component.literal("Pl3xMap could not register this polygon: " + exception.getMessage()));
+			ArowsMod.warn("Could not save polygons.json after creating {} for {}.", name, draft.ownerName(), exception);
+			source.sendFailure(Component.literal("Could not save this polygon: " + exception.getMessage()));
 			return 0;
 		}
 	}
@@ -315,6 +385,52 @@ public final class MapPolygonCommands {
 		return owned.size();
 	}
 
+	/** The file is updated only after the map marker is replaced. A failed save puts the old marker back. */
+	private static int rename(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, Collection<NameAndId> profiles, String name, String newName) {
+		NameAndId owner = onePlayer(source, profiles);
+		if (owner == null) {
+			return 0;
+		}
+		SavedPolygon polygon = store.find(owner.id(), name).orElse(null);
+		if (polygon == null) {
+			source.sendFailure(Component.literal(owner.name() + " has no polygon named " + name + "."));
+			return 0;
+		}
+		SavedPolygon taken = store.find(owner.id(), newName).orElse(null);
+		if (taken != null && taken != polygon) {
+			source.sendFailure(Component.literal(owner.name() + " already has a polygon named " + newName + "."));
+			return 0;
+		}
+		if (polygon.name().equals(newName)) {
+			source.sendSuccess(() -> Component.literal(polygon.name() + " is already named that."), false);
+			return 1;
+		}
+		SavedPolygon renamed = new SavedPolygon(polygon.ownerId(), polygon.ownerName(), newName, polygon.worldId(), polygon.color(), polygon.points());
+		try {
+			bridge.renameMarker(polygon, renamed);
+		} catch (RuntimeException exception) {
+			ArowsMod.warn("Could not rename marker {} for {} in {}.", polygon.name(), owner.name(), polygon.worldId(), exception);
+			source.sendFailure(Component.literal("Pl3xMap could not rename this polygon: " + exception.getMessage()));
+			return 0;
+		}
+		try {
+			store.replace(polygon, renamed);
+		} catch (RuntimeException exception) {
+			try {
+				bridge.renameMarker(renamed, polygon);
+			} catch (RuntimeException rollback) {
+				exception.addSuppressed(rollback);
+			}
+			ArowsMod.warn("Could not save polygons.json after renaming {} for {}.", polygon.name(), owner.name(), exception);
+			source.sendFailure(Component.literal("Could not save the renamed polygon: " + exception.getMessage()));
+			return 0;
+		}
+		ArowsMod.info("{} renamed polygon {} to {} for {} in {} ({} points).",
+				source.getTextName(), polygon.name(), newName, owner.name(), polygon.worldId(), polygon.points().size());
+		source.sendSuccess(() -> Component.literal("Renamed " + polygon.name() + " to " + newName + " for " + owner.name() + "."), false);
+		return 1;
+	}
+
 	private static int remove(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, Collection<NameAndId> profiles, String name) {
 		NameAndId owner = onePlayer(source, profiles);
 		if (owner == null) {
@@ -328,13 +444,25 @@ public final class MapPolygonCommands {
 		try {
 			bridge.hide(polygon);
 		} catch (RuntimeException exception) {
-			ArowsMod.LOGGER.error("Pl3xMap could not remove polygon {} for {}", polygon.name(), owner.name(), exception);
+			ArowsMod.warn("Could not remove marker {} for {} in {}.", polygon.name(), owner.name(), polygon.worldId(), exception);
 			source.sendFailure(Component.literal("Pl3xMap could not remove this polygon: " + exception.getMessage()));
 			return 0;
 		}
 		store.remove(polygon);
+		ArowsMod.info("{} removed polygon {} for {} in {} ({} points).",
+				source.getTextName(), polygon.name(), owner.name(), polygon.worldId(), polygon.points().size());
 		source.sendSuccess(() -> Component.literal("Removed " + polygon.name() + " from " + owner.name() + "."), false);
 		return 1;
+	}
+
+	private static void logColorChanged(CommandSourceStack source, NameAndId owner, List<SavedPolygon> polygons, int restyled) {
+		if (polygons.size() == 1) {
+			SavedPolygon polygon = polygons.getFirst();
+			ArowsMod.info("{} changed the color for {} on polygon {} in {} ({} points).",
+					source.getTextName(), owner.name(), polygon.name(), polygon.worldId(), polygon.points().size());
+			return;
+		}
+		ArowsMod.info("{} changed the color for {} ({} markers).", source.getTextName(), owner.name(), restyled);
 	}
 
 	private static ServerPlayer operator(CommandSourceStack source) {
