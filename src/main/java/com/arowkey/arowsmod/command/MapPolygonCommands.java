@@ -139,7 +139,6 @@ public final class MapPolygonCommands {
 				+ "Colors are six hex digits with no #.\n"
 				+ "More detail: ").append(link);
 		source.sendSuccess(() -> message, false);
-		ArowsMod.info("{} showed polygon help.", source.getTextName());
 		return 1;
 	}
 
