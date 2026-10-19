@@ -23,6 +23,8 @@ public class ArowsMod implements ModInitializer {
 			return;
 		}
 
+		// Fabric already refuses to launch when the pl3xmap mod is missing. api() is still null
+		// here because Pl3xMap's dedicated-server initializer has not constructed it yet.
 		if (!FabricLoader.getInstance().isModLoaded("pl3xmap")) {
 			throw new IllegalStateException("ArowsMod requires the Pl3xMap mod. It is not loaded, so polygon markers cannot be registered.");
 		}
@@ -32,10 +34,12 @@ public class ArowsMod implements ModInitializer {
 		store.load();
 		Pl3xMapBridge bridge = new Pl3xMapBridge(store, config);
 		MapPolygonCommands.register(config, store, bridge);
+		// Subscribe before Pl3xMap's own SERVER_STARTED listener runs enable().
 		bridge.registerWhenPl3xMapStarts();
 		LOGGER.info("ArowsMod map commands are ready. Map layers register after Pl3xMap enables.");
 	}
 
+	/** Called after Pl3xMap's constructor has published the API. Not used during onInitialize. */
 	public static Pl3xMap pl3xMapApi() {
 		Pl3xMap api = Pl3xMap.api();
 		if (api == null) {

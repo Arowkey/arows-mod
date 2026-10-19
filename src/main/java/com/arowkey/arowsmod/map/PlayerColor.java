@@ -6,6 +6,10 @@ public final class PlayerColor {
 	private PlayerColor() {
 	}
 
+	/**
+	 * Accepts {@code RRGGBB} or a single leading {@code #}. Commands ask for the form without a hash
+	 * because Minecraft treats {@code #} as a comment. Stored colors keep the hash for the files already on disk.
+	 */
 	public static String parse(String raw) {
 		if (raw == null || raw.isEmpty()) {
 			return null;

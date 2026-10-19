@@ -34,6 +34,12 @@ public final class MapPolygonCommands {
 				register(dispatcher, registryAccess, config, store, bridge));
 	}
 
+	/**
+	 * Every polygon command and {@code /arowsmod reload} require operator permission
+	 * ({@link Permissions#COMMANDS_GAMEMASTER}, level 2). Start, add, finish, and cancel also need
+	 * a player position. List, remove, color, rename, and reload can run from the console.
+	 */
+
 	private static void register(
 			CommandDispatcher<CommandSourceStack> dispatcher,
 			CommandBuildContext registryAccess,
@@ -327,6 +333,7 @@ public final class MapPolygonCommands {
 		return owned.size();
 	}
 
+	/** The file is updated only after the map marker is replaced. A failed save puts the old marker back. */
 	private static int rename(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, Collection<NameAndId> profiles, String name, String newName) {
 		NameAndId owner = onePlayer(source, profiles);
 		if (owner == null) {

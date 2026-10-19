@@ -251,8 +251,13 @@ public final class ArowsConfig {
 		return (alpha << 24) | (rgb & 0xFFFFFF);
 	}
 
+	/**
+	 * Creates {@code config/arowsmod.json} on first launch. An older file that has no {@code //} comments
+	 * and no {@code stroke-enabled} key is rewritten once, keeping the four original numbers.
+	 * A file that already has comments is never rewritten here.
+	 */
 	public static ArowsConfig load() {
-		Path path = FabricLoader.getInstance().getConfigDir().resolve("arowsmod.json");
+		Path path = configPath("arowsmod.json");
 		try {
 			if (Files.notExists(path)) {
 				writeTemplate(path, DEFAULT_MAX_POLYGONS, DEFAULT_STROKE_WEIGHT, DEFAULT_STROKE_OPACITY, DEFAULT_FILL_OPACITY);
@@ -277,8 +282,9 @@ public final class ArowsConfig {
 		}
 	}
 
+	/** Re-reads the file. Does not write it, so commented lines stay. A bad file leaves the current snapshot. */
 	public String reload() {
-		Path path = FabricLoader.getInstance().getConfigDir().resolve("arowsmod.json");
+		Path path = configPath("arowsmod.json");
 		if (Files.notExists(path)) {
 			return path + " is missing. Kept the current config.";
 		}
@@ -292,8 +298,17 @@ public final class ArowsConfig {
 		}
 	}
 
+	/**
+	 * Keys that are missing after comment stripping stay null and are not applied to markers.
+	 * The four original keys are required.
+	 */
 	private static Snapshot read(Path path) throws IOException {
 		JsonObject json = parseObject(Files.readString(path), path);
+		IntPair tooltipOffset = readOptionalPair(json, "tooltip-offset-x", "tooltip-offset-z", path);
+		IntPair popupOffset = readOptionalPair(json, "popup-offset-x", "popup-offset-z", path);
+		IntPair popupPadding = readOptionalPair(json, "popup-auto-pan-padding-x", "popup-auto-pan-padding-z", path);
+		IntPair popupPaddingTopLeft = readOptionalPair(json, "popup-auto-pan-padding-top-left-x", "popup-auto-pan-padding-top-left-z", path);
+		IntPair popupPaddingBottomRight = readOptionalPair(json, "popup-auto-pan-padding-bottom-right-x", "popup-auto-pan-padding-bottom-right-z", path);
 		return new Snapshot(
 				readNonNegativeInt(json, MAX_POLYGONS_KEY, path),
 				readNonNegativeInt(json, STROKE_WEIGHT_KEY, path),
@@ -309,32 +324,35 @@ public final class ArowsConfig {
 				readOptionalString(json, "marker-pane", path),
 				readOptionalString(json, "tooltip-content", path),
 				readOptionalString(json, "tooltip-pane", path),
-				readOptionalPair(json, "tooltip-offset-x", "tooltip-offset-z", path)[0],
-				readOptionalPair(json, "tooltip-offset-x", "tooltip-offset-z", path)[1],
+				tooltipOffset.x,
+				tooltipOffset.z,
 				readOptionalEnum(json, "tooltip-direction", path, TOOLTIP_DIRECTIONS),
 				readOptionalBoolean(json, "tooltip-permanent", path),
 				readOptionalBoolean(json, "tooltip-sticky", path),
 				readOptionalUnit(json, "tooltip-opacity", path),
 				readOptionalString(json, "popup-content", path),
 				readOptionalString(json, "popup-pane", path),
-				readOptionalPair(json, "popup-offset-x", "popup-offset-z", path)[0],
-				readOptionalPair(json, "popup-offset-x", "popup-offset-z", path)[1],
+				popupOffset.x,
+				popupOffset.z,
 				readOptionalInt(json, "popup-max-width", path),
 				readOptionalInt(json, "popup-min-width", path),
 				readOptionalInt(json, "popup-max-height", path),
 				readOptionalBoolean(json, "popup-auto-pan", path),
-				readOptionalPair(json, "popup-auto-pan-padding-x", "popup-auto-pan-padding-z", path)[0],
-				readOptionalPair(json, "popup-auto-pan-padding-x", "popup-auto-pan-padding-z", path)[1],
-				readOptionalPair(json, "popup-auto-pan-padding-top-left-x", "popup-auto-pan-padding-top-left-z", path)[0],
-				readOptionalPair(json, "popup-auto-pan-padding-top-left-x", "popup-auto-pan-padding-top-left-z", path)[1],
-				readOptionalPair(json, "popup-auto-pan-padding-bottom-right-x", "popup-auto-pan-padding-bottom-right-z", path)[0],
-				readOptionalPair(json, "popup-auto-pan-padding-bottom-right-x", "popup-auto-pan-padding-bottom-right-z", path)[1],
+				popupPadding.x,
+				popupPadding.z,
+				popupPaddingTopLeft.x,
+				popupPaddingTopLeft.z,
+				popupPaddingBottomRight.x,
+				popupPaddingBottomRight.z,
 				readOptionalBoolean(json, "popup-keep-in-view", path),
 				readOptionalBoolean(json, "popup-close-button", path),
 				readOptionalBoolean(json, "popup-auto-close", path),
 				readOptionalBoolean(json, "popup-close-on-escape-key", path),
 				readOptionalBoolean(json, "popup-close-on-click", path)
 		);
+	}
+
+	private record IntPair(Integer x, Integer z) {
 	}
 
 	private record Snapshot(
@@ -380,6 +398,22 @@ public final class ArowsConfig {
 	) {
 	}
 
+	static Path configPath(String... parts) {
+		Path root = FabricLoader.getInstance().getConfigDir().toAbsolutePath().normalize();
+		Path path = root;
+		for (String part : parts) {
+			if (part.isBlank() || part.equals(".") || part.equals("..") || part.indexOf('/') >= 0 || part.indexOf('\\') >= 0) {
+				throw new IllegalStateException("Refusing a config path that leaves the config directory.");
+			}
+			path = path.resolve(part);
+		}
+		Path normalized = path.toAbsolutePath().normalize();
+		if (!normalized.startsWith(root)) {
+			throw new IllegalStateException("Refusing a config path that leaves the config directory.");
+		}
+		return normalized;
+	}
+
 	private static JsonObject parseObject(String text, Path path) {
 		JsonElement parsed = JsonParser.parseString(stripComments(text));
 		if (parsed == null || !parsed.isJsonObject()) {
@@ -388,6 +422,7 @@ public final class ArowsConfig {
 		return parsed.getAsJsonObject();
 	}
 
+	/** Drops {@code //} and block comments that sit outside JSON strings. The file on disk is left unchanged. */
 	static String stripComments(String text) {
 		StringBuilder out = new StringBuilder(text.length());
 		boolean inString = false;
@@ -481,13 +516,13 @@ public final class ArowsConfig {
 		return (int) value;
 	}
 
-	private static Integer[] readOptionalPair(JsonObject json, String xKey, String zKey, Path path) {
+	private static IntPair readOptionalPair(JsonObject json, String xKey, String zKey, Path path) {
 		Integer x = readOptionalInteger(json, xKey, path);
 		Integer z = readOptionalInteger(json, zKey, path);
 		if ((x == null) != (z == null)) {
 			throw new IllegalStateException(path + " " + xKey + " and " + zKey + " must be set together.");
 		}
-		return new Integer[] { x, z };
+		return new IntPair(x, z);
 	}
 
 	private static double readOpacity(JsonObject json, String key, Path path) {

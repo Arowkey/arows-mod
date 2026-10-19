@@ -5,7 +5,6 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -30,15 +29,21 @@ public final class PolygonStore {
 	private final Map<UUID, String> colors = new HashMap<>();
 
 	public PolygonStore() {
-		this.path = FabricLoader.getInstance().getConfigDir().resolve("arowsmod").resolve("polygons.json");
+		// Fixed child of the config directory. Polygon names are never used as path segments.
+		this.path = ArowsConfig.configPath("arowsmod", "polygons.json");
 	}
 
+	/**
+	 * Reads polygons into temporary lists and swaps them in only after the whole file parses.
+	 * A bad file leaves the previous in-memory polygons and colors in place and is not rewritten.
+	 * In-progress drafts are not in this file.
+	 */
 	public synchronized void load() {
-		this.polygons.clear();
-		this.colors.clear();
 		if (Files.notExists(this.path)) {
 			return;
 		}
+		List<SavedPolygon> loadedPolygons = new ArrayList<>();
+		Map<UUID, String> loadedColors = new HashMap<>();
 		try (Reader reader = Files.newBufferedReader(this.path)) {
 			JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
 			if (root.has("players")) {
@@ -48,7 +53,7 @@ public final class PolygonStore {
 					if (color == null) {
 						throw new IllegalStateException(this.path + " has an invalid color for " + ownerId + ".");
 					}
-					this.colors.put(UUID.fromString(ownerId), color);
+					loadedColors.put(UUID.fromString(ownerId), color);
 				}
 			}
 			JsonArray array = root.getAsJsonArray("polygons");
@@ -67,8 +72,8 @@ public final class PolygonStore {
 				if (color == null) {
 					throw new IllegalStateException(this.path + " has an invalid color on polygon " + json.get("name") + ".");
 				}
-				this.colors.putIfAbsent(ownerId, color);
-				this.polygons.add(new SavedPolygon(
+				loadedColors.putIfAbsent(ownerId, color);
+				loadedPolygons.add(new SavedPolygon(
 						ownerId,
 						json.get("ownerName").getAsString(),
 						json.get("name").getAsString(),
@@ -82,6 +87,10 @@ public final class PolygonStore {
 		} catch (Exception exception) {
 			throw new IllegalStateException("Could not read saved ArowsMod polygons at " + this.path, exception);
 		}
+		this.polygons.clear();
+		this.polygons.addAll(loadedPolygons);
+		this.colors.clear();
+		this.colors.putAll(loadedColors);
 	}
 
 	public synchronized Optional<String> colorOf(UUID ownerId) {
@@ -230,6 +239,7 @@ public final class PolygonStore {
 		root.add("polygons", array);
 		try {
 			Files.createDirectories(this.path.getParent());
+			// Write a sibling temp file, then replace polygons.json. A failed write leaves the old file.
 			Path temporary = this.path.resolveSibling(this.path.getFileName() + ".tmp");
 			try (Writer writer = Files.newBufferedWriter(temporary)) {
 				GSON.toJson(root, writer);

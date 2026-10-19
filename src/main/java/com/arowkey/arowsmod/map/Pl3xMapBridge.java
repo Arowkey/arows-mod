@@ -38,8 +38,8 @@ public final class Pl3xMapBridge implements EventListener {
 	}
 
 	public void registerWhenPl3xMapStarts() {
-		// Registered from the main entrypoint, before Pl3xMap's dedicated-server initializer
-		// registers its own SERVER_STARTED listener, so this callback runs first.
+		// This listener is registered from the main entrypoint, before Pl3xMap registers its own
+		// SERVER_STARTED listener, so it runs first: api() exists, but enable() has not run.
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> this.onServerStarted());
 	}
 
@@ -56,7 +56,7 @@ public final class Pl3xMapBridge implements EventListener {
 
 	@EventHandler
 	public void onEnabled(Pl3xMapEnabledEvent event) {
-		// enable() fires this event before loadWorlds(), so attach on the next tick.
+		// enable() fires this event and only then calls loadWorlds(), so the world list is still empty.
 		this.syncQueued = true;
 		if (this.tickRegistered) {
 			return;
@@ -97,6 +97,7 @@ public final class Pl3xMapBridge implements EventListener {
 	}
 
 	public void renameMarker(SavedPolygon previous, SavedPolygon next) {
+		// The marker id includes the name, so the old id is removed after the new marker is added.
 		World world = ArowsMod.pl3xMapApi().getWorldRegistry().get(previous.worldId());
 		if (world == null) {
 			throw new IllegalStateException("Pl3xMap is not showing " + previous.worldId() + " yet.");
@@ -187,13 +188,12 @@ public final class Pl3xMapBridge implements EventListener {
 	}
 
 	private Options options(SavedPolygon polygon, int rgb) {
+		// Null config values are commented-out options and are left at Pl3xMap's own default.
 		Options.Builder builder = Options.builder()
 				.strokeWeight(this.config.strokeWeight())
 				.strokeColor(this.config.strokeColor(rgb))
 				.fillColor(this.config.fillColor(rgb))
-				.tooltipContent(this.config.tooltipContent() != null
-						? this.config.tooltipContent()
-						: polygon.name() + " (" + polygon.ownerName() + ")");
+				.tooltipContent(this.tooltip(polygon));
 		if (this.config.strokeEnabled() != null) {
 			builder.stroke(this.config.strokeEnabled());
 		}
@@ -279,5 +279,24 @@ public final class Pl3xMapBridge implements EventListener {
 			builder.popupShouldCloseOnClick(this.config.popupCloseOnClick());
 		}
 		return builder.build();
+	}
+
+	/**
+	 * Pl3xMap renders tooltip and popup content as HTML. A custom tooltip from the config is operator
+	 * HTML. The default tooltip is built from the polygon and player names, which are escaped.
+	 */
+	private String tooltip(SavedPolygon polygon) {
+		if (this.config.tooltipContent() != null) {
+			return this.config.tooltipContent();
+		}
+		return htmlText(polygon.name()) + " (" + htmlText(polygon.ownerName()) + ")";
+	}
+
+	private static String htmlText(String text) {
+		return text.replace("&", "&amp;")
+				.replace("<", "&lt;")
+				.replace(">", "&gt;")
+				.replace("\"", "&quot;")
+				.replace("'", "&#39;");
 	}
 }
