@@ -21,7 +21,10 @@ import net.pl3x.map.core.markers.option.Tooltip;
 import net.pl3x.map.core.world.World;
 
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 public final class Pl3xMapBridge implements EventListener {
 	/** Stable Pl3xMap layer id. The visible name comes from config key layer-name. */
@@ -78,8 +81,19 @@ public final class Pl3xMapBridge implements EventListener {
 	}
 
 	public void syncLoadedWorlds() {
+		Set<String> loaded = new HashSet<>();
 		for (World world : ArowsMod.pl3xMapApi().getWorldRegistry()) {
+			loaded.add(world.getKey());
 			this.attach(world);
+		}
+		Set<String> waiting = new LinkedHashSet<>();
+		for (SavedPolygon polygon : this.store.all()) {
+			if (!loaded.contains(polygon.worldId())) {
+				waiting.add(polygon.worldId());
+			}
+		}
+		for (String worldId : waiting) {
+			ArowsMod.warn("World {} is not on Pl3xMap yet. Its polygons will be registered when that world loads.", worldId);
 		}
 	}
 
@@ -88,12 +102,23 @@ public final class Pl3xMapBridge implements EventListener {
 		if (world == null) {
 			return false;
 		}
+		boolean created = !world.getLayerRegistry().has(LAYER_KEY);
 		SimpleLayer layer = this.layer(world);
 		String key = polygon.markerKey();
 		if (layer.hasMarker(key)) {
 			layer.removeMarker(key);
 		}
-		layer.addMarker(this.marker(polygon));
+		try {
+			layer.addMarker(this.marker(polygon));
+		} catch (RuntimeException exception) {
+			if (created) {
+				this.logLayer(world, layer);
+			}
+			throw exception;
+		}
+		if (created) {
+			this.logLayer(world, layer);
+		}
 		return true;
 	}
 
@@ -103,30 +128,37 @@ public final class Pl3xMapBridge implements EventListener {
 		if (world == null) {
 			throw new IllegalStateException("Pl3xMap is not showing " + previous.worldId() + " yet.");
 		}
+		boolean created = !world.getLayerRegistry().has(LAYER_KEY);
 		SimpleLayer layer = this.layer(world);
 		String oldKey = previous.markerKey();
 		String newKey = next.markerKey();
-		if (oldKey.equals(newKey)) {
-			if (layer.hasMarker(oldKey)) {
-				layer.removeMarker(oldKey);
+		try {
+			if (oldKey.equals(newKey)) {
+				if (layer.hasMarker(oldKey)) {
+					layer.removeMarker(oldKey);
+				}
+				layer.addMarker(this.marker(next));
+				return;
 			}
 			layer.addMarker(this.marker(next));
-			return;
-		}
-		layer.addMarker(this.marker(next));
-		try {
-			if (layer.hasMarker(oldKey)) {
-				layer.removeMarker(oldKey);
-			}
-		} catch (RuntimeException exception) {
 			try {
-				if (layer.hasMarker(newKey)) {
-					layer.removeMarker(newKey);
+				if (layer.hasMarker(oldKey)) {
+					layer.removeMarker(oldKey);
 				}
-			} catch (RuntimeException rollback) {
-				exception.addSuppressed(rollback);
+			} catch (RuntimeException exception) {
+				try {
+					if (layer.hasMarker(newKey)) {
+						layer.removeMarker(newKey);
+					}
+				} catch (RuntimeException rollback) {
+					exception.addSuppressed(rollback);
+				}
+				throw exception;
 			}
-			throw exception;
+		} finally {
+			if (created) {
+				this.logLayer(world, layer);
+			}
 		}
 	}
 
@@ -142,12 +174,30 @@ public final class Pl3xMapBridge implements EventListener {
 	}
 
 	private void attach(World world) {
+		boolean created = !world.getLayerRegistry().has(LAYER_KEY);
 		SimpleLayer layer = this.layer(world);
 		for (SavedPolygon polygon : this.store.byWorld(world.getKey())) {
-			if (!layer.hasMarker(polygon.markerKey())) {
+			if (layer.hasMarker(polygon.markerKey())) {
+				continue;
+			}
+			try {
 				layer.addMarker(this.marker(polygon));
+			} catch (RuntimeException exception) {
+				ArowsMod.warn("Could not register marker {} for {} in {}.", polygon.name(), polygon.ownerName(), world.getKey(), exception);
 			}
 		}
+		if (created) {
+			this.logLayer(world, layer);
+		}
+	}
+
+	private void logLayer(World world, SimpleLayer layer) {
+		ArowsMod.info("Registered map layer {} ({}) in {} with {} {}.",
+				LAYER_KEY,
+				this.config.layerName(),
+				world.getKey(),
+				layer.getMarkers().size(),
+				layer.getMarkers().size() == 1 ? "marker" : "markers");
 	}
 
 	public void refreshLayerLabels() {
@@ -169,6 +219,7 @@ public final class Pl3xMapBridge implements EventListener {
 				layer.setLabel(this.config.layerName());
 				return layer;
 			}
+			ArowsMod.warn("Could not register map layer {} in {}. A different layer already uses that id.", LAYER_KEY, world.getKey());
 			throw new IllegalStateException("Pl3xMap world " + world.getKey() + " already has a layer named " + LAYER_KEY + " that ArowsMod does not own.");
 		}
 		SimpleLayer layer = new SimpleLayer(LAYER_KEY, this.config::layerName);

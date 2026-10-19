@@ -1,5 +1,6 @@
 package com.arowkey.arowsmod.map;
 
+import com.arowkey.arowsmod.ArowsMod;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -83,8 +84,10 @@ public final class PolygonStore {
 				));
 			}
 		} catch (RuntimeException exception) {
+			ArowsMod.error("Could not read polygons.json.", exception);
 			throw exception;
 		} catch (Exception exception) {
+			ArowsMod.error("Could not read polygons.json.", exception);
 			throw new IllegalStateException("Could not read saved ArowsMod polygons at " + this.path, exception);
 		}
 		this.polygons.clear();
@@ -140,6 +143,14 @@ public final class PolygonStore {
 
 	public synchronized PolygonDraft removeDraft(UUID operatorId) {
 		return this.drafts.remove(operatorId);
+	}
+
+	public synchronized int polygonCount() {
+		return this.polygons.size();
+	}
+
+	public synchronized int colorCount() {
+		return this.colors.size();
 	}
 
 	public synchronized int countFinished(UUID ownerId) {
@@ -250,6 +261,7 @@ public final class PolygonStore {
 				Files.move(temporary, this.path, StandardCopyOption.REPLACE_EXISTING);
 			}
 		} catch (IOException exception) {
+			ArowsMod.warn("Could not save polygons.json.", exception);
 			throw new IllegalStateException("Could not save ArowsMod polygons to " + this.path, exception);
 		}
 	}
