@@ -101,7 +101,19 @@ public final class MapPolygonCommands {
 																bridge,
 																profiles(context),
 																com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name")
-														))))))));
+														)))))
+								.then(Commands.literal("rename")
+										.then(Commands.argument("player", GameProfileArgument.gameProfile())
+												.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
+														.then(Commands.argument("new-name", com.mojang.brigadier.arguments.StringArgumentType.word())
+																.executes(context -> rename(
+																		context.getSource(),
+																		store,
+																		bridge,
+																		profiles(context),
+																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "new-name")
+																)))))))));
 	}
 
 	private static boolean isOperator(CommandSourceStack source) {
@@ -313,6 +325,49 @@ public final class MapPolygonCommands {
 		}
 		source.sendSuccess(() -> Component.literal(message.toString()), false);
 		return owned.size();
+	}
+
+	private static int rename(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, Collection<NameAndId> profiles, String name, String newName) {
+		NameAndId owner = onePlayer(source, profiles);
+		if (owner == null) {
+			return 0;
+		}
+		SavedPolygon polygon = store.find(owner.id(), name).orElse(null);
+		if (polygon == null) {
+			source.sendFailure(Component.literal(owner.name() + " has no polygon named " + name + "."));
+			return 0;
+		}
+		SavedPolygon taken = store.find(owner.id(), newName).orElse(null);
+		if (taken != null && taken != polygon) {
+			source.sendFailure(Component.literal(owner.name() + " already has a polygon named " + newName + "."));
+			return 0;
+		}
+		if (polygon.name().equals(newName)) {
+			source.sendSuccess(() -> Component.literal(polygon.name() + " is already named that."), false);
+			return 1;
+		}
+		SavedPolygon renamed = new SavedPolygon(polygon.ownerId(), polygon.ownerName(), newName, polygon.worldId(), polygon.color(), polygon.points());
+		try {
+			bridge.renameMarker(polygon, renamed);
+		} catch (RuntimeException exception) {
+			ArowsMod.LOGGER.error("Pl3xMap could not rename polygon {} for {}", polygon.name(), owner.name(), exception);
+			source.sendFailure(Component.literal("Pl3xMap could not rename this polygon: " + exception.getMessage()));
+			return 0;
+		}
+		try {
+			store.replace(polygon, renamed);
+		} catch (RuntimeException exception) {
+			try {
+				bridge.renameMarker(renamed, polygon);
+			} catch (RuntimeException rollback) {
+				exception.addSuppressed(rollback);
+			}
+			ArowsMod.LOGGER.error("Could not save renamed polygon {} for {}", polygon.name(), owner.name(), exception);
+			source.sendFailure(Component.literal("Could not save the renamed polygon: " + exception.getMessage()));
+			return 0;
+		}
+		source.sendSuccess(() -> Component.literal("Renamed " + polygon.name() + " to " + newName + " for " + owner.name() + "."), false);
+		return 1;
 	}
 
 	private static int remove(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, Collection<NameAndId> profiles, String name) {

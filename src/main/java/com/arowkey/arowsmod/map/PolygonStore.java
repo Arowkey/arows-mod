@@ -193,6 +193,15 @@ public final class PolygonStore {
 		return removed;
 	}
 
+	public synchronized void replace(SavedPolygon previous, SavedPolygon next) {
+		int index = this.polygons.indexOf(previous);
+		if (index < 0) {
+			throw new IllegalStateException("That polygon is no longer saved.");
+		}
+		this.polygons.set(index, next);
+		save();
+	}
+
 	private void save() {
 		JsonArray array = new JsonArray();
 		for (SavedPolygon polygon : this.polygons) {

@@ -93,6 +93,38 @@ public final class Pl3xMapBridge implements EventListener {
 		return true;
 	}
 
+	public void renameMarker(SavedPolygon previous, SavedPolygon next) {
+		World world = ArowsMod.pl3xMapApi().getWorldRegistry().get(previous.worldId());
+		if (world == null) {
+			throw new IllegalStateException("Pl3xMap is not showing " + previous.worldId() + " yet.");
+		}
+		SimpleLayer layer = this.layer(world);
+		String oldKey = previous.markerKey();
+		String newKey = next.markerKey();
+		if (oldKey.equals(newKey)) {
+			if (layer.hasMarker(oldKey)) {
+				layer.removeMarker(oldKey);
+			}
+			layer.addMarker(this.marker(next));
+			return;
+		}
+		layer.addMarker(this.marker(next));
+		try {
+			if (layer.hasMarker(oldKey)) {
+				layer.removeMarker(oldKey);
+			}
+		} catch (RuntimeException exception) {
+			try {
+				if (layer.hasMarker(newKey)) {
+					layer.removeMarker(newKey);
+				}
+			} catch (RuntimeException rollback) {
+				exception.addSuppressed(rollback);
+			}
+			throw exception;
+		}
+	}
+
 	public void hide(SavedPolygon polygon) {
 		World world = ArowsMod.pl3xMapApi().getWorldRegistry().get(polygon.worldId());
 		if (world == null || !world.getLayerRegistry().has(LAYER_KEY)) {
