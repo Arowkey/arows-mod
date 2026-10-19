@@ -23,7 +23,9 @@ The first start creates `config/arowsmod.json` and, after the first saved polygo
 
 Every ArowsMod command requires operator permission (permission level 2).
 
-`start`, `add`, `finish`, and `cancel` also need a player in a world, because they use that operator's position and dimension. The console cannot run those four. `list`, `remove`, `rename`, `color`, and `reload` can be run by any level-2 source, including the console.
+`start`, `add`, `finish`, and `cancel` also need a player in a world, because they use that operator's position and dimension. The console cannot run those four. `list`, `remove`, `rename`, `color`, `help`, and `reload` can be run by any level-2 source, including the console.
+
+`/arowsmod map polygon help`, or `/arowsmod map polygon` with nothing after it, prints a short reminder in chat and links to this page.
 
 ## Polygon creation
 

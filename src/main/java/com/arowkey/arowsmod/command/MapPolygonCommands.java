@@ -16,12 +16,14 @@ import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.GameProfileArgument;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.Permissions;
 import net.minecraft.server.players.NameAndId;
 import net.pl3x.map.core.markers.Point;
 
+import java.net.URI;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -39,7 +41,7 @@ public final class MapPolygonCommands {
 	/**
 	 * Every polygon command and {@code /arowsmod reload} require operator permission
 	 * ({@link Permissions#COMMANDS_GAMEMASTER}, level 2). Start, add, finish, and cancel also need
-	 * a player position. List, remove, color, rename, and reload can run from the console.
+	 * a player position. List, remove, color, rename, help, and reload can run from the console.
 	 */
 
 	private static void register(
@@ -56,6 +58,9 @@ public final class MapPolygonCommands {
 				.then(Commands.literal("map")
 						.then(Commands.literal("polygon")
 								.requires(MapPolygonCommands::isOperator)
+								.executes(context -> help(context.getSource()))
+								.then(Commands.literal("help")
+										.executes(context -> help(context.getSource())))
 								.then(Commands.literal("start")
 										.then(Commands.argument("player", GameProfileArgument.gameProfile())
 												.executes(context -> start(context.getSource(), store, profiles(context), null))
@@ -122,6 +127,20 @@ public final class MapPolygonCommands {
 																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
 																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "new-name")
 																)))))))));
+	}
+
+	private static int help(CommandSourceStack source) {
+		Component link = Component.literal("https://github.com/Arowkey/arows-mod").withStyle(style -> style
+				.withClickEvent(new ClickEvent.OpenUrl(URI.create("https://github.com/Arowkey/arows-mod")))
+				.withUnderlined(true));
+		Component message = Component.literal("Operators draw Pl3xMap polygons for a player.\n"
+				+ "First polygon: /arowsmod map polygon start <player> <RRGGBB>, then add, then finish <name>.\n"
+				+ "Later: list, color, rename, remove, and cancel for the one in progress.\n"
+				+ "Colors are six hex digits with no #.\n"
+				+ "More detail: ").append(link);
+		source.sendSuccess(() -> message, false);
+		ArowsMod.info("{} showed polygon help.", source.getTextName());
+		return 1;
 	}
 
 	private static boolean isOperator(CommandSourceStack source) {
