@@ -98,7 +98,7 @@ An existing config file is not replaced with a new template. Keys added in a lat
 
 Stroke and fill both use the player's color. `stroke-color` and `fill-color` are comments in the default file and are not separate colors.
 
-The generated file also includes tooltip and popup settings (pane, offset, tooltip direction, popup size, and close behavior). Commented options such as `tooltip-content`, `popup-content`, dash pattern, and marker pane stay inactive until you remove the `//`. If you set `tooltip-content` or `popup-content`, Pl3xMap renders that value as HTML.
+The generated file also includes tooltip and popup settings (pane, offset, tooltip direction, popup size, and close behavior). Commented options such as `tooltip-content`, `popup-content`, dash pattern, and marker pane stay inactive until you remove the `//`. If you set `tooltip-content` or `popup-content`, Pl3xMap renders that value as HTML. The built-in pane name `tooltipPane` is not sent to the map, because that hides the tooltip. A popup is added only when `popup-content` is set.
 
 ## For server admins
 

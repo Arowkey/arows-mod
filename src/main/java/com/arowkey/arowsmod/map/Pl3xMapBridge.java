@@ -280,7 +280,9 @@ public final class Pl3xMapBridge implements EventListener {
 		if (this.config.fillType() != null) {
 			builder.fillType(Fill.Type.valueOf(this.config.fillType()));
 		}
-		if (this.config.tooltipPane() != null) {
+		// Pl3xMap rewrites the pane name "tooltipPane" to "tooltip". That is not a Leaflet
+		// pane, so the tooltip is created and never shown. Omit the built-in name.
+		if (this.config.tooltipPane() != null && !"tooltipPane".equals(this.config.tooltipPane())) {
 			builder.tooltipPane(this.config.tooltipPane());
 		}
 		if (this.config.tooltipOffsetX() != null) {
@@ -298,50 +300,52 @@ public final class Pl3xMapBridge implements EventListener {
 		if (this.config.tooltipOpacity() != null) {
 			builder.tooltipOpacity(this.config.tooltipOpacity());
 		}
-		if (this.config.popupContent() != null) {
-			builder.popupContent(this.config.popupContent());
-		}
-		if (this.config.popupPane() != null) {
-			builder.popupPane(this.config.popupPane());
-		}
-		if (this.config.popupOffsetX() != null) {
-			builder.popupOffset(Point.of(this.config.popupOffsetX(), this.config.popupOffsetZ()));
-		}
-		if (this.config.popupMaxWidth() != null) {
-			builder.popupMaxWidth(this.config.popupMaxWidth());
-		}
-		if (this.config.popupMinWidth() != null) {
-			builder.popupMinWidth(this.config.popupMinWidth());
-		}
-		if (this.config.popupMaxHeight() != null) {
-			builder.popupMaxHeight(this.config.popupMaxHeight());
-		}
-		if (this.config.popupAutoPan() != null) {
-			builder.popupShouldAutoPan(this.config.popupAutoPan());
-		}
-		if (this.config.popupAutoPanPaddingX() != null) {
-			builder.popupAutoPanPadding(Point.of(this.config.popupAutoPanPaddingX(), this.config.popupAutoPanPaddingZ()));
-		}
-		if (this.config.popupAutoPanPaddingTopLeftX() != null) {
-			builder.popupAutoPanPaddingTopLeft(Point.of(this.config.popupAutoPanPaddingTopLeftX(), this.config.popupAutoPanPaddingTopLeftZ()));
-		}
-		if (this.config.popupAutoPanPaddingBottomRightX() != null) {
-			builder.popupAutoPanPaddingBottomRight(Point.of(this.config.popupAutoPanPaddingBottomRightX(), this.config.popupAutoPanPaddingBottomRightZ()));
-		}
-		if (this.config.popupKeepInView() != null) {
-			builder.popupShouldKeepInView(this.config.popupKeepInView());
-		}
-		if (this.config.popupCloseButton() != null) {
-			builder.popupCloseButton(this.config.popupCloseButton());
-		}
-		if (this.config.popupAutoClose() != null) {
-			builder.popupShouldAutoClose(this.config.popupAutoClose());
-		}
-		if (this.config.popupCloseOnEscapeKey() != null) {
-			builder.popupShouldCloseOnEscapeKey(this.config.popupCloseOnEscapeKey());
-		}
-		if (this.config.popupCloseOnClick() != null) {
-			builder.popupShouldCloseOnClick(this.config.popupCloseOnClick());
+		// There was no click popup before marker options. Do not bind an empty one.
+		String popup = this.config.popupContent();
+		if (popup != null && !popup.isBlank()) {
+			builder.popupContent(popup);
+			if (this.config.popupPane() != null && !"popupPane".equals(this.config.popupPane())) {
+				builder.popupPane(this.config.popupPane());
+			}
+			if (this.config.popupOffsetX() != null) {
+				builder.popupOffset(Point.of(this.config.popupOffsetX(), this.config.popupOffsetZ()));
+			}
+			if (this.config.popupMaxWidth() != null) {
+				builder.popupMaxWidth(this.config.popupMaxWidth());
+			}
+			if (this.config.popupMinWidth() != null) {
+				builder.popupMinWidth(this.config.popupMinWidth());
+			}
+			if (this.config.popupMaxHeight() != null) {
+				builder.popupMaxHeight(this.config.popupMaxHeight());
+			}
+			if (this.config.popupAutoPan() != null) {
+				builder.popupShouldAutoPan(this.config.popupAutoPan());
+			}
+			if (this.config.popupAutoPanPaddingX() != null) {
+				builder.popupAutoPanPadding(Point.of(this.config.popupAutoPanPaddingX(), this.config.popupAutoPanPaddingZ()));
+			}
+			if (this.config.popupAutoPanPaddingTopLeftX() != null) {
+				builder.popupAutoPanPaddingTopLeft(Point.of(this.config.popupAutoPanPaddingTopLeftX(), this.config.popupAutoPanPaddingTopLeftZ()));
+			}
+			if (this.config.popupAutoPanPaddingBottomRightX() != null) {
+				builder.popupAutoPanPaddingBottomRight(Point.of(this.config.popupAutoPanPaddingBottomRightX(), this.config.popupAutoPanPaddingBottomRightZ()));
+			}
+			if (this.config.popupKeepInView() != null) {
+				builder.popupShouldKeepInView(this.config.popupKeepInView());
+			}
+			if (this.config.popupCloseButton() != null) {
+				builder.popupCloseButton(this.config.popupCloseButton());
+			}
+			if (this.config.popupAutoClose() != null) {
+				builder.popupShouldAutoClose(this.config.popupAutoClose());
+			}
+			if (this.config.popupCloseOnEscapeKey() != null) {
+				builder.popupShouldCloseOnEscapeKey(this.config.popupCloseOnEscapeKey());
+			}
+			if (this.config.popupCloseOnClick() != null) {
+				builder.popupShouldCloseOnClick(this.config.popupCloseOnClick());
+			}
 		}
 		return builder.build();
 	}
@@ -351,8 +355,9 @@ public final class Pl3xMapBridge implements EventListener {
 	 * HTML. The default tooltip is built from the polygon and player names, which are escaped.
 	 */
 	private String tooltip(SavedPolygon polygon) {
-		if (this.config.tooltipContent() != null) {
-			return this.config.tooltipContent();
+		String custom = this.config.tooltipContent();
+		if (custom != null && !custom.isBlank()) {
+			return custom;
 		}
 		return htmlText(polygon.name()) + " (" + htmlText(polygon.ownerName()) + ")";
 	}
