@@ -14,7 +14,10 @@ import net.pl3x.map.core.markers.layer.SimpleLayer;
 import net.pl3x.map.core.markers.marker.Marker;
 import net.pl3x.map.core.markers.marker.Polygon;
 import net.pl3x.map.core.markers.marker.Polyline;
+import net.pl3x.map.core.markers.option.Fill;
 import net.pl3x.map.core.markers.option.Options;
+import net.pl3x.map.core.markers.option.Stroke;
+import net.pl3x.map.core.markers.option.Tooltip;
 import net.pl3x.map.core.world.World;
 
 import java.util.ArrayList;
@@ -176,14 +179,105 @@ public final class Pl3xMapBridge implements EventListener {
 		}
 		Polygon marker = Marker.polygon(polygon.markerKey(), Polyline.of(polygon.markerKey() + "-outline", points));
 		int rgb = PlayerColor.rgb(polygon.color());
-		marker.setOptions(Options.builder()
-				.stroke(true)
+		if (this.config.markerPane() != null) {
+			marker.setPane(this.config.markerPane());
+		}
+		marker.setOptions(this.options(polygon, rgb));
+		return marker;
+	}
+
+	private Options options(SavedPolygon polygon, int rgb) {
+		Options.Builder builder = Options.builder()
 				.strokeWeight(this.config.strokeWeight())
 				.strokeColor(this.config.strokeColor(rgb))
-				.fill(true)
 				.fillColor(this.config.fillColor(rgb))
-				.tooltipContent(polygon.name() + " (" + polygon.ownerName() + ")")
-				.build());
-		return marker;
+				.tooltipContent(this.config.tooltipContent() != null
+						? this.config.tooltipContent()
+						: polygon.name() + " (" + polygon.ownerName() + ")");
+		if (this.config.strokeEnabled() != null) {
+			builder.stroke(this.config.strokeEnabled());
+		}
+		if (this.config.strokeLineCap() != null) {
+			builder.strokeLineCapShape(Stroke.LineCapShape.valueOf(this.config.strokeLineCap()));
+		}
+		if (this.config.strokeLineJoin() != null) {
+			builder.strokeLineJoinShape(Stroke.LineJoinShape.valueOf(this.config.strokeLineJoin()));
+		}
+		if (this.config.strokeDashPattern() != null) {
+			builder.strokeDashPattern(this.config.strokeDashPattern());
+		}
+		if (this.config.strokeDashOffset() != null) {
+			builder.strokeDashOffset(this.config.strokeDashOffset());
+		}
+		if (this.config.fillEnabled() != null) {
+			builder.fill(this.config.fillEnabled());
+		}
+		if (this.config.fillType() != null) {
+			builder.fillType(Fill.Type.valueOf(this.config.fillType()));
+		}
+		if (this.config.tooltipPane() != null) {
+			builder.tooltipPane(this.config.tooltipPane());
+		}
+		if (this.config.tooltipOffsetX() != null) {
+			builder.tooltipOffset(Point.of(this.config.tooltipOffsetX(), this.config.tooltipOffsetZ()));
+		}
+		if (this.config.tooltipDirection() != null) {
+			builder.tooltipDirection(Tooltip.Direction.valueOf(this.config.tooltipDirection()));
+		}
+		if (this.config.tooltipPermanent() != null) {
+			builder.tooltipPermanent(this.config.tooltipPermanent());
+		}
+		if (this.config.tooltipSticky() != null) {
+			builder.tooltipSticky(this.config.tooltipSticky());
+		}
+		if (this.config.tooltipOpacity() != null) {
+			builder.tooltipOpacity(this.config.tooltipOpacity());
+		}
+		if (this.config.popupContent() != null) {
+			builder.popupContent(this.config.popupContent());
+		}
+		if (this.config.popupPane() != null) {
+			builder.popupPane(this.config.popupPane());
+		}
+		if (this.config.popupOffsetX() != null) {
+			builder.popupOffset(Point.of(this.config.popupOffsetX(), this.config.popupOffsetZ()));
+		}
+		if (this.config.popupMaxWidth() != null) {
+			builder.popupMaxWidth(this.config.popupMaxWidth());
+		}
+		if (this.config.popupMinWidth() != null) {
+			builder.popupMinWidth(this.config.popupMinWidth());
+		}
+		if (this.config.popupMaxHeight() != null) {
+			builder.popupMaxHeight(this.config.popupMaxHeight());
+		}
+		if (this.config.popupAutoPan() != null) {
+			builder.popupShouldAutoPan(this.config.popupAutoPan());
+		}
+		if (this.config.popupAutoPanPaddingX() != null) {
+			builder.popupAutoPanPadding(Point.of(this.config.popupAutoPanPaddingX(), this.config.popupAutoPanPaddingZ()));
+		}
+		if (this.config.popupAutoPanPaddingTopLeftX() != null) {
+			builder.popupAutoPanPaddingTopLeft(Point.of(this.config.popupAutoPanPaddingTopLeftX(), this.config.popupAutoPanPaddingTopLeftZ()));
+		}
+		if (this.config.popupAutoPanPaddingBottomRightX() != null) {
+			builder.popupAutoPanPaddingBottomRight(Point.of(this.config.popupAutoPanPaddingBottomRightX(), this.config.popupAutoPanPaddingBottomRightZ()));
+		}
+		if (this.config.popupKeepInView() != null) {
+			builder.popupShouldKeepInView(this.config.popupKeepInView());
+		}
+		if (this.config.popupCloseButton() != null) {
+			builder.popupCloseButton(this.config.popupCloseButton());
+		}
+		if (this.config.popupAutoClose() != null) {
+			builder.popupShouldAutoClose(this.config.popupAutoClose());
+		}
+		if (this.config.popupCloseOnEscapeKey() != null) {
+			builder.popupShouldCloseOnEscapeKey(this.config.popupCloseOnEscapeKey());
+		}
+		if (this.config.popupCloseOnClick() != null) {
+			builder.popupShouldCloseOnClick(this.config.popupCloseOnClick());
+		}
+		return builder.build();
 	}
 }
