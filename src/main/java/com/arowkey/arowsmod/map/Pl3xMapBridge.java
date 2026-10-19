@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class Pl3xMapBridge implements EventListener {
+	/** Stable Pl3xMap layer id. The visible name comes from config key layer-name. */
 	public static final String LAYER_KEY = "arowsmod";
 
 	private final PolygonStore store;
@@ -149,15 +150,28 @@ public final class Pl3xMapBridge implements EventListener {
 		}
 	}
 
+	public void refreshLayerLabels() {
+		for (World world : ArowsMod.pl3xMapApi().getWorldRegistry()) {
+			if (!world.getLayerRegistry().has(LAYER_KEY)) {
+				continue;
+			}
+			Layer existing = world.getLayerRegistry().get(LAYER_KEY);
+			if (existing instanceof SimpleLayer layer) {
+				layer.setLabel(this.config.layerName());
+			}
+		}
+	}
+
 	private SimpleLayer layer(World world) {
 		if (world.getLayerRegistry().has(LAYER_KEY)) {
 			Layer existing = world.getLayerRegistry().get(LAYER_KEY);
 			if (existing instanceof SimpleLayer layer) {
+				layer.setLabel(this.config.layerName());
 				return layer;
 			}
 			throw new IllegalStateException("Pl3xMap world " + world.getKey() + " already has a layer named " + LAYER_KEY + " that ArowsMod does not own.");
 		}
-		SimpleLayer layer = new SimpleLayer(LAYER_KEY, () -> "ArowsMod");
+		SimpleLayer layer = new SimpleLayer(LAYER_KEY, this.config::layerName);
 		layer.setShowControls(true);
 		layer.setDefaultHidden(false);
 		layer.setPriority(40);

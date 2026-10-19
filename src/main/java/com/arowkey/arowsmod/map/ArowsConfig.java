@@ -16,6 +16,8 @@ public final class ArowsConfig {
 	public static final String STROKE_WEIGHT_KEY = "stroke-weight";
 	public static final String STROKE_OPACITY_KEY = "stroke-opacity";
 	public static final String FILL_OPACITY_KEY = "fill-opacity";
+	public static final String LAYER_NAME_KEY = "layer-name";
+	public static final String DEFAULT_LAYER_NAME = "ArowsMod";
 
 	public static final int DEFAULT_MAX_POLYGONS = 10;
 	public static final int DEFAULT_STROKE_WEIGHT = 3;
@@ -31,6 +33,7 @@ public final class ArowsConfig {
 			// ArowsMod polygon marker options. Lines starting with // are ignored and stay inactive.
 			// Player colors are not stored here. Set them with /arowsmod map polygon color.
 			{
+			  "layer-name": "ArowsMod",
 			  "max-polygons-per-player": 10,
 			  "stroke-enabled": true,
 			  "stroke-weight": 3,
@@ -95,6 +98,10 @@ public final class ArowsConfig {
 
 	public double fillOpacity() {
 		return this.snapshot.fillOpacity;
+	}
+
+	public String layerName() {
+		return this.snapshot.layerName;
 	}
 
 	public Boolean strokeEnabled() {
@@ -272,6 +279,14 @@ public final class ArowsConfig {
 							readOpacity(previous, STROKE_OPACITY_KEY, path),
 							readOpacity(previous, FILL_OPACITY_KEY, path)
 					);
+				} else if (!existing.contains("layer-name")) {
+					int open = existing.indexOf('{');
+					if (open >= 0) {
+						String inserted = existing.substring(0, open + 1)
+								+ "\n  \"layer-name\": \"ArowsMod\","
+								+ existing.substring(open + 1);
+						Files.writeString(path, inserted);
+					}
 				}
 			}
 			return new ArowsConfig(read(path));
@@ -348,7 +363,8 @@ public final class ArowsConfig {
 				readOptionalBoolean(json, "popup-close-button", path),
 				readOptionalBoolean(json, "popup-auto-close", path),
 				readOptionalBoolean(json, "popup-close-on-escape-key", path),
-				readOptionalBoolean(json, "popup-close-on-click", path)
+				readOptionalBoolean(json, "popup-close-on-click", path),
+				readLayerName(json, path)
 		);
 	}
 
@@ -394,7 +410,8 @@ public final class ArowsConfig {
 			Boolean popupCloseButton,
 			Boolean popupAutoClose,
 			Boolean popupCloseOnEscapeKey,
-			Boolean popupCloseOnClick
+			Boolean popupCloseOnClick,
+			String layerName
 	) {
 	}
 
@@ -480,6 +497,17 @@ public final class ArowsConfig {
 				.replace("\"fill-opacity\": 0.35", "\"fill-opacity\": " + fillOpacity);
 		Files.createDirectories(path.getParent());
 		Files.writeString(path, text);
+	}
+
+	private static String readLayerName(JsonObject json, Path path) {
+		String name = readOptionalString(json, LAYER_NAME_KEY, path);
+		if (name == null) {
+			return DEFAULT_LAYER_NAME;
+		}
+		if (name.isBlank()) {
+			throw new IllegalStateException(path + " " + LAYER_NAME_KEY + " must not be blank.");
+		}
+		return name;
 	}
 
 	private static int readNonNegativeInt(JsonObject json, String key, Path path) {

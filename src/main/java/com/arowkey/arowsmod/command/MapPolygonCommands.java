@@ -135,6 +135,7 @@ public final class MapPolygonCommands {
 		List<SavedPolygon> polygons = store.all();
 		int waiting = 0;
 		try {
+			bridge.refreshLayerLabels();
 			for (SavedPolygon polygon : polygons) {
 				if (!bridge.show(polygon)) {
 					waiting++;
