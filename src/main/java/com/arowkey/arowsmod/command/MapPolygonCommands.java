@@ -49,6 +49,8 @@ public final class MapPolygonCommands {
 	 * ({@link Permissions#COMMANDS_GAMEMASTER}, level 2). Start, add-point, undo-point, finish, cancel,
 	 * show without a Y, and insert-point or edit-point without coordinates need a player position.
 	 * Show with a Y, hide, and the other polygon commands can run from the console.
+	 * undo-point removes the last in-progress point and cancels the draft when none remain.
+	 * There are no aliases for the previous command names.
 	 */
 
 	private static void register(
@@ -243,7 +245,8 @@ public final class MapPolygonCommands {
 				.withUnderlined(true));
 		Component message = Component.literal("Operators draw Pl3xMap polygons for a player.\n"
 				+ "First polygon: /arowsmod map polygon start <player> <RRGGBB>, then add-point, then finish <name>.\n"
-				+ "undo-point removes the last point. cancel drops the one in progress.\n"
+				+ "undo-point removes the last in-progress point. With no points left, the draft is cancelled. cancel drops the one in progress.\n"
+				+ "/arowsmod reload rereads the config.\n"
 				+ "show <player> <name> previews a saved polygon at your Y. show <player> <name> <y> uses that height. The console has to pass <y>.\n"
 				+ "Later: list, list <player> <name>, color, rename, remove, insert-point, edit-point, and remove-point.\n"
 				+ "insert-point and edit-point use your x and z when coordinates are left out. The console has to pass <x> <z>.\n"
@@ -467,22 +470,27 @@ public final class MapPolygonCommands {
 		}
 		try {
 			store.add(polygon);
-			store.removeDraft(operator.getUUID());
-			visuals.clearDraft(operator.getUUID());
-			ArowsMod.info("{} created polygon {} for {} in {} ({} points).",
-					source.getTextName(), name, draft.ownerName(), draft.worldId(), polygon.points().size());
-			if (shown) {
-				source.sendSuccess(() -> Component.literal("Created " + name + " for " + draft.ownerName() + " on the ArowsMod map layer."), false);
-			} else {
-				source.sendSuccess(() -> Component.literal("Saved " + name + " for " + draft.ownerName() + ". Pl3xMap is not showing " + draft.worldId() + " yet; the marker will be registered when that world loads."), false);
-				ArowsMod.warn("World {} is not on Pl3xMap yet.", draft.worldId());
-			}
-			return 1;
 		} catch (RuntimeException exception) {
+			try {
+				bridge.hide(polygon);
+			} catch (RuntimeException rollback) {
+				exception.addSuppressed(rollback);
+			}
 			ArowsMod.warn("Could not save polygons.json after creating {} for {}.", name, draft.ownerName(), exception);
 			source.sendFailure(Component.literal("Could not save this polygon: " + exception.getMessage()));
 			return 0;
 		}
+		store.removeDraft(operator.getUUID());
+		visuals.clearDraft(operator.getUUID());
+		ArowsMod.info("{} created polygon {} for {} in {} ({} points).",
+				source.getTextName(), name, draft.ownerName(), draft.worldId(), polygon.points().size());
+		if (shown) {
+			source.sendSuccess(() -> Component.literal("Created " + name + " for " + draft.ownerName() + " on the ArowsMod map layer."), false);
+		} else {
+			source.sendSuccess(() -> Component.literal("Saved " + name + " for " + draft.ownerName() + ". Pl3xMap is not showing " + draft.worldId() + " yet; the marker will be registered when that world loads."), false);
+			ArowsMod.warn("World {} is not on Pl3xMap yet.", draft.worldId());
+		}
+		return 1;
 	}
 
 	private static int cancel(CommandSourceStack source, PolygonStore store, PolygonVisuals visuals) {

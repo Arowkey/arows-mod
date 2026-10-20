@@ -42,7 +42,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Block and text displays for a polygon an operator is drawing or has asked to see.
- * They are discarded instead of saved, including when their chunk unloads.
+ * A draft uses the feet height stored with each point. show uses one Y for every marker.
+ * The edge back to the first point is magenta concrete only while the polygon is in progress.
+ * Displays are discarded instead of saved, including when their chunk unloads.
  */
 public final class PolygonVisuals {
 	/** Viewer id for a preview started from the server console. */
@@ -123,22 +125,20 @@ public final class PolygonVisuals {
 	}
 
 	public void refresh(SavedPolygon polygon, MinecraftServer server) {
-		List<UUID> viewers = new ArrayList<>();
-		List<Integer> heights = new ArrayList<>();
+		List<Map.Entry<UUID, Shown>> matching = new ArrayList<>();
 		for (Map.Entry<UUID, Shown> entry : this.shows.entrySet()) {
 			Shown shown = entry.getValue();
 			if (shown.ownerId.equals(polygon.ownerId()) && shown.name.equalsIgnoreCase(polygon.name())) {
-				viewers.add(entry.getKey());
-				heights.add(shown.y);
+				matching.add(Map.entry(entry.getKey(), shown));
 			}
 		}
-		for (int index = 0; index < viewers.size(); index++) {
-			UUID viewerId = viewers.get(index);
+		for (Map.Entry<UUID, Shown> entry : matching) {
+			UUID viewerId = entry.getKey();
 			if (!viewerId.equals(CONSOLE_VIEWER) && server.getPlayerList().getPlayer(viewerId) == null) {
 				this.clearShow(viewerId);
 				continue;
 			}
-			this.showSaved(server, viewerId, polygon, heights.get(index));
+			this.showSaved(server, viewerId, polygon, entry.getValue().y);
 		}
 	}
 
@@ -299,6 +299,10 @@ public final class PolygonVisuals {
 	}
 
 	private static Placed blockDisplay(ServerLevel level, double x, double y, double z, Block block, Transformation transformation) {
+		String scale = scaleProblem(transformation, "block");
+		if (scale != null) {
+			return Placed.failed(scale);
+		}
 		BlockState state = block.defaultBlockState();
 		if (state.isAir()) {
 			return Placed.failed("the block display has no block");
@@ -310,8 +314,12 @@ public final class PolygonVisuals {
 	}
 
 	private static Placed textDisplay(ServerLevel level, double x, double y, double z, String text) {
-		Display.TextDisplay display = new Display.TextDisplay(EntityTypes.TEXT_DISPLAY, level);
 		Transformation transformation = new Transformation(new Vector3f(0f, 0f, 0f), new Quaternionf(), new Vector3f(TEXT_SCALE, TEXT_SCALE, TEXT_SCALE), new Quaternionf());
+		String scale = scaleProblem(transformation, "text");
+		if (scale != null) {
+			return Placed.failed(scale);
+		}
+		Display.TextDisplay display = new Display.TextDisplay(EntityTypes.TEXT_DISPLAY, level);
 		TagValueOutput output = displayData(level.registryAccess(), x, y, z, transformation);
 		output.store("text", ComponentSerialization.CODEC, Component.literal(text));
 		output.store("billboard", Display.BillboardConstraints.CODEC, Display.BillboardConstraints.CENTER);
@@ -344,12 +352,9 @@ public final class PolygonVisuals {
 					+ display.getX() + ", " + display.getY() + ", " + display.getZ()
 					+ " instead of the marker");
 		}
-		String invalid = invalidDisplay(display, level.registryAccess(), kind);
+		String invalid = unreadableBlock(display, level.registryAccess());
 		if (invalid != null) {
 			return Placed.failed(invalid);
-		}
-		if (display.level() != level) {
-			return Placed.failed("the " + kind + " display was created in the wrong world");
 		}
 		int chunkX = SectionPos.blockToSectionCoord(display.blockPosition().getX());
 		int chunkZ = SectionPos.blockToSectionCoord(display.blockPosition().getZ());
@@ -365,26 +370,25 @@ public final class PolygonVisuals {
 		return new Placed(display, null);
 	}
 
-	private static String invalidDisplay(Display display, RegistryAccess registries, String kind) {
-		TagValueOutput output = TagValueOutput.createWithContext(ProblemReporter.DISCARDING, registries);
-		display.saveWithoutId(output);
-		ValueInput input = TagValueInput.create(ProblemReporter.DISCARDING, registries, output.buildResult());
-		if (input.getFloatOr("view_range", 0f) <= 0f) {
-			return "the " + kind + " display view range is zero";
-		}
-		Transformation transformation = input.read("transformation", Transformation.EXTENDED_CODEC).orElse(Transformation.IDENTITY);
+	private static String scaleProblem(Transformation transformation, String kind) {
 		Vector3fc scale = transformation.scale();
 		if (Math.abs(scale.x()) < 0.001f || Math.abs(scale.y()) < 0.001f || Math.abs(scale.z()) < 0.001f) {
 			return "the " + kind + " display scale is zero";
 		}
-		if (display instanceof Display.BlockDisplay) {
-			BlockState state = input.read("block_state", BlockState.CODEC).orElse(Blocks.AIR.defaultBlockState());
-			if (state.isAir()) {
-				return "the block display has no block";
-			}
+		return null;
+	}
+
+	/** Block displays stay invisible when the saved block does not decode, so confirm it stuck. */
+	private static String unreadableBlock(Display display, RegistryAccess registries) {
+		if (!(display instanceof Display.BlockDisplay)) {
+			return null;
 		}
-		if (display instanceof Display.TextDisplay && input.read("text", ComponentSerialization.CODEC).isEmpty()) {
-			return "the text display has no text";
+		TagValueOutput output = TagValueOutput.createWithContext(ProblemReporter.DISCARDING, registries);
+		display.saveWithoutId(output);
+		ValueInput input = TagValueInput.create(ProblemReporter.DISCARDING, registries, output.buildResult());
+		BlockState state = input.read("block_state", BlockState.CODEC).orElse(Blocks.AIR.defaultBlockState());
+		if (state.isAir()) {
+			return "the block display has no block";
 		}
 		return null;
 	}
@@ -418,9 +422,13 @@ public final class PolygonVisuals {
 	}
 
 	private static ServerLevel level(MinecraftServer server, String worldId) {
-		Identifier identifier = Identifier.parse(worldId);
-		ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, identifier);
-		return server.getLevel(key);
+		try {
+			Identifier identifier = Identifier.parse(worldId);
+			ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, identifier);
+			return server.getLevel(key);
+		} catch (IllegalArgumentException exception) {
+			return null;
+		}
 	}
 
 	private record MarkerPoint(int x, int y, int z) {

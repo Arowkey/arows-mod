@@ -27,6 +27,8 @@ Every ArowsMod command requires operator permission (permission level 2).
 
 `/arowsmod map polygon help`, or `/arowsmod map polygon` with nothing after it, prints a short reminder in chat and links to this page.
 
+The command names are `add-point`, `undo-point`, `finish`, `cancel`, `list`, `remove`, `rename`, `color`, `show`, `hide`, `insert-point`, `edit-point`, `remove-point`, `help`, and `reload`. Older names are not aliases.
+
 ## Polygon creation
 
 Colors are six hex digits with no `#`, for example `3dd68c`. The first polygon for a player must include a color. Later polygons for that player reuse the saved color.
@@ -48,7 +50,7 @@ While you are creating a polygon, corners and edges are shown with block display
 /arowsmod map polygon undo-point
 ```
 
-`undo-point` removes the last point and updates the displays. If that was the only point, the in-progress polygon is cancelled.
+`undo-point` removes the last in-progress point and updates the displays. With no points left, the draft is cancelled.
 
 `finish <name>` saves the polygon under that name for the player you started it for and removes the in-progress displays. The name is one word. That player cannot already have a polygon with the same name, ignoring case. In-progress polygons do not count toward the per-player cap.
 

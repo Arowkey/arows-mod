@@ -101,11 +101,23 @@ public final class PolygonStore {
 	}
 
 	public synchronized void rememberColor(UUID ownerId, String color) {
-		this.colors.put(ownerId, color);
-		save();
+		String previous = this.colors.put(ownerId, color);
+		saveOrRevert(() -> {
+			if (previous == null) {
+				this.colors.remove(ownerId);
+			} else {
+				this.colors.put(ownerId, previous);
+			}
+		});
 	}
 
 	public synchronized List<SavedPolygon> recolor(UUID ownerId, String color) {
+		Map<UUID, String> colorsBefore = new HashMap<>(this.colors);
+		List<SavedPolygon> polygonsBefore = new ArrayList<>(this.polygons);
+		Map<UUID, String> draftColors = new HashMap<>();
+		for (Map.Entry<UUID, PolygonDraft> entry : this.drafts.entrySet()) {
+			draftColors.put(entry.getKey(), entry.getValue().color());
+		}
 		this.colors.put(ownerId, color);
 		List<SavedPolygon> updated = new ArrayList<>();
 		for (int index = 0; index < this.polygons.size(); index++) {
@@ -129,7 +141,15 @@ public final class PolygonStore {
 				draft.setColor(color);
 			}
 		}
-		save();
+		saveOrRevert(() -> {
+			this.colors.clear();
+			this.colors.putAll(colorsBefore);
+			this.polygons.clear();
+			this.polygons.addAll(polygonsBefore);
+			for (Map.Entry<UUID, PolygonDraft> entry : this.drafts.entrySet()) {
+				entry.getValue().setColor(draftColors.get(entry.getKey()));
+			}
+		});
 		return updated;
 	}
 
@@ -202,13 +222,13 @@ public final class PolygonStore {
 
 	public synchronized void add(SavedPolygon polygon) {
 		this.polygons.add(polygon);
-		save();
+		saveOrRevert(() -> this.polygons.remove(polygon));
 	}
 
 	public synchronized boolean remove(SavedPolygon polygon) {
 		boolean removed = this.polygons.remove(polygon);
 		if (removed) {
-			save();
+			saveOrRevert(() -> this.polygons.add(polygon));
 		}
 		return removed;
 	}
@@ -219,7 +239,17 @@ public final class PolygonStore {
 			throw new IllegalStateException("That polygon is no longer saved.");
 		}
 		this.polygons.set(index, next);
-		save();
+		saveOrRevert(() -> this.polygons.set(index, previous));
+	}
+
+	/** A failed write puts the in-memory polygons and colors back. The file is left unchanged. */
+	private void saveOrRevert(Runnable revert) {
+		try {
+			save();
+		} catch (RuntimeException exception) {
+			revert.run();
+			throw exception;
+		}
 	}
 
 	private void save() {
