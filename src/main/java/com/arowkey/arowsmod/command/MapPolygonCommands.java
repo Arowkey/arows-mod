@@ -3,10 +3,12 @@ package com.arowkey.arowsmod.command;
 import com.arowkey.arowsmod.ArowsMod;
 import com.arowkey.arowsmod.map.ArowsConfig;
 import com.arowkey.arowsmod.map.MapPoint;
+import com.arowkey.arowsmod.map.DraftPoint;
 import com.arowkey.arowsmod.map.Pl3xMapBridge;
 import com.arowkey.arowsmod.map.PlayerColor;
 import com.arowkey.arowsmod.map.PolygonDraft;
 import com.arowkey.arowsmod.map.PolygonStore;
+import com.arowkey.arowsmod.map.PolygonVisuals;
 import com.arowkey.arowsmod.map.SavedPolygon;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -24,24 +26,31 @@ import net.minecraft.server.players.NameAndId;
 import net.pl3x.map.core.markers.Point;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 public final class MapPolygonCommands {
 	private MapPolygonCommands() {
 	}
 
 	public static void register(ArowsConfig config, PolygonStore store, Pl3xMapBridge bridge) {
+		PolygonVisuals visuals = new PolygonVisuals();
+		visuals.start();
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
-				register(dispatcher, registryAccess, config, store, bridge));
+				register(dispatcher, registryAccess, config, store, bridge, visuals));
 	}
 
 	/**
 	 * Every polygon command and {@code /arowsmod reload} require operator permission
-	 * ({@link Permissions#COMMANDS_GAMEMASTER}, level 2). Start, add, finish, and cancel also need
-	 * a player position. List, remove, color, rename, help, and reload can run from the console.
+	 * ({@link Permissions#COMMANDS_GAMEMASTER}, level 2). Start, add-point, undo-point, finish, cancel,
+	 * show without a Y, and insert-point or edit-point without coordinates need a player position.
+	 * Show with a Y, hide, and the other polygon commands can run from the console.
+	 * undo-point removes the last in-progress point and cancels the draft when none remain.
+	 * There are no aliases for the previous command names.
 	 */
 
 	private static void register(
@@ -49,7 +58,8 @@ public final class MapPolygonCommands {
 			CommandBuildContext registryAccess,
 			ArowsConfig config,
 			PolygonStore store,
-			Pl3xMapBridge bridge
+			Pl3xMapBridge bridge,
+			PolygonVisuals visuals
 	) {
 		dispatcher.register(Commands.literal("arowsmod")
 				.then(Commands.literal("reload")
@@ -81,16 +91,19 @@ public final class MapPolygonCommands {
 																profiles(context),
 																com.mojang.brigadier.arguments.StringArgumentType.getString(context, "color")
 														)))))
-								.then(Commands.literal("add")
-										.executes(context -> addHere(context.getSource(), store))
+								.then(Commands.literal("add-point")
+										.executes(context -> addHere(context.getSource(), store, visuals))
 										.then(Commands.argument("x", IntegerArgumentType.integer())
 												.then(Commands.argument("z", IntegerArgumentType.integer())
 														.executes(context -> addAt(
 																context.getSource(),
 																store,
+																visuals,
 																IntegerArgumentType.getInteger(context, "x"),
 																IntegerArgumentType.getInteger(context, "z")
 														)))))
+								.then(Commands.literal("undo-point")
+										.executes(context -> undo(context.getSource(), store, visuals)))
 								.then(Commands.literal("finish")
 										.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
 												.executes(context -> finish(
@@ -98,13 +111,108 @@ public final class MapPolygonCommands {
 														config,
 														store,
 														bridge,
+														visuals,
 														com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name")
 												))))
 								.then(Commands.literal("cancel")
-										.executes(context -> cancel(context.getSource(), store)))
+										.executes(context -> cancel(context.getSource(), store, visuals)))
+								.then(Commands.literal("show")
+										.then(Commands.argument("player", GameProfileArgument.gameProfile())
+												.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
+														.executes(context -> show(
+																context.getSource(),
+																store,
+																visuals,
+																profiles(context),
+																com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																null
+														))
+														.then(Commands.argument("y", IntegerArgumentType.integer())
+																.executes(context -> show(
+																		context.getSource(),
+																		store,
+																		visuals,
+																		profiles(context),
+																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																		IntegerArgumentType.getInteger(context, "y")
+																))))))
+								.then(Commands.literal("hide")
+										.executes(context -> hide(context.getSource(), visuals)))
 								.then(Commands.literal("list")
 										.then(Commands.argument("player", GameProfileArgument.gameProfile())
-												.executes(context -> list(context.getSource(), store, profiles(context)))))
+												.executes(context -> list(context.getSource(), store, profiles(context)))
+												.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
+														.executes(context -> listPoints(
+																context.getSource(),
+																store,
+																profiles(context),
+																com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name")
+														)))))
+								.then(Commands.literal("insert-point")
+										.then(Commands.argument("player", GameProfileArgument.gameProfile())
+												.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
+														.then(Commands.argument("index", IntegerArgumentType.integer(1))
+																.executes(context -> insertHere(
+																		context.getSource(),
+																		store,
+																		bridge,
+																		visuals,
+																		profiles(context),
+																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																		IntegerArgumentType.getInteger(context, "index")
+																))
+																.then(Commands.argument("x", IntegerArgumentType.integer())
+																		.then(Commands.argument("z", IntegerArgumentType.integer())
+																				.executes(context -> insert(
+																						context.getSource(),
+																						store,
+																						bridge,
+																						visuals,
+																						profiles(context),
+																						com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																						IntegerArgumentType.getInteger(context, "index"),
+																						IntegerArgumentType.getInteger(context, "x"),
+																						IntegerArgumentType.getInteger(context, "z")
+																				))))))))
+								.then(Commands.literal("edit-point")
+										.then(Commands.argument("player", GameProfileArgument.gameProfile())
+												.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
+														.then(Commands.argument("index", IntegerArgumentType.integer(1))
+																.executes(context -> editHere(
+																		context.getSource(),
+																		store,
+																		bridge,
+																		visuals,
+																		profiles(context),
+																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																		IntegerArgumentType.getInteger(context, "index")
+																))
+																.then(Commands.argument("x", IntegerArgumentType.integer())
+																		.then(Commands.argument("z", IntegerArgumentType.integer())
+																				.executes(context -> edit(
+																						context.getSource(),
+																						store,
+																						bridge,
+																						visuals,
+																						profiles(context),
+																						com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																						IntegerArgumentType.getInteger(context, "index"),
+																						IntegerArgumentType.getInteger(context, "x"),
+																						IntegerArgumentType.getInteger(context, "z")
+																				))))))))
+								.then(Commands.literal("remove-point")
+										.then(Commands.argument("player", GameProfileArgument.gameProfile())
+												.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
+														.then(Commands.argument("index", IntegerArgumentType.integer(1))
+																.executes(context -> delete(
+																		context.getSource(),
+																		store,
+																		bridge,
+																		visuals,
+																		profiles(context),
+																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																		IntegerArgumentType.getInteger(context, "index")
+																))))))
 								.then(Commands.literal("remove")
 										.then(Commands.argument("player", GameProfileArgument.gameProfile())
 												.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
@@ -113,7 +221,8 @@ public final class MapPolygonCommands {
 																store,
 																bridge,
 																profiles(context),
-																com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name")
+																com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																visuals
 														)))))
 								.then(Commands.literal("rename")
 										.then(Commands.argument("player", GameProfileArgument.gameProfile())
@@ -124,8 +233,9 @@ public final class MapPolygonCommands {
 																		store,
 																		bridge,
 																		profiles(context),
-																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
-																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "new-name")
+																com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																com.mojang.brigadier.arguments.StringArgumentType.getString(context, "new-name"),
+																visuals
 																)))))))));
 	}
 
@@ -134,8 +244,12 @@ public final class MapPolygonCommands {
 				.withClickEvent(new ClickEvent.OpenUrl(URI.create("https://github.com/Arowkey/arows-mod")))
 				.withUnderlined(true));
 		Component message = Component.literal("Operators draw Pl3xMap polygons for a player.\n"
-				+ "First polygon: /arowsmod map polygon start <player> <RRGGBB>, then add, then finish <name>.\n"
-				+ "Later: list, color, rename, remove, and cancel for the one in progress.\n"
+				+ "First polygon: /arowsmod map polygon start <player> <RRGGBB>, then add-point, then finish <name>.\n"
+				+ "undo-point removes the last in-progress point. With no points left, the draft is cancelled. cancel drops the one in progress.\n"
+				+ "/arowsmod reload rereads the config.\n"
+				+ "show <player> <name> previews a saved polygon at your Y. show <player> <name> <y> uses that height. The console has to pass <y>.\n"
+				+ "Later: list, list <player> <name>, color, rename, remove, insert-point, edit-point, and remove-point.\n"
+				+ "insert-point and edit-point use your x and z when coordinates are left out. The console has to pass <x> <z>.\n"
 				+ "Colors are six hex digits with no #.\n"
 				+ "More detail: ").append(link);
 		source.sendSuccess(() -> message, false);
@@ -266,39 +380,63 @@ public final class MapPolygonCommands {
 		return 1;
 	}
 
-	private static int addHere(CommandSourceStack source, PolygonStore store) {
+	private static int addHere(CommandSourceStack source, PolygonStore store, PolygonVisuals visuals) {
 		ServerPlayer operator = operator(source);
 		if (operator == null) {
 			return 0;
 		}
 		Point point = Point.of(source.getPosition().x(), source.getPosition().z());
-		return add(source, store, new MapPoint(point.x(), point.z()));
+		return add(source, store, visuals, new MapPoint(point.x(), point.z()));
 	}
 
-	private static int addAt(CommandSourceStack source, PolygonStore store, int x, int z) {
+	private static int addAt(CommandSourceStack source, PolygonStore store, PolygonVisuals visuals, int x, int z) {
 		if (operator(source) == null) {
 			return 0;
 		}
-		return add(source, store, new MapPoint(x, z));
+		return add(source, store, visuals, new MapPoint(x, z));
 	}
 
-	private static int add(CommandSourceStack source, PolygonStore store, MapPoint point) {
-		PolygonDraft draft = store.draftFor(source.getPlayer().getUUID());
+	private static int add(CommandSourceStack source, PolygonStore store, PolygonVisuals visuals, MapPoint point) {
+		ServerPlayer operator = source.getPlayer();
+		PolygonDraft draft = store.draftFor(operator.getUUID());
 		if (draft == null) {
-			source.sendFailure(Component.literal("Start a polygon before adding points."));
+			source.sendFailure(Component.literal("Start a polygon before using add-point."));
 			return 0;
 		}
 		String worldId = source.getLevel().dimension().identifier().toString();
 		if (!draft.worldId().equals(worldId)) {
-			source.sendFailure(Component.literal("This polygon is in " + draft.worldId() + ". Stay in that world to add points."));
+			source.sendFailure(Component.literal("This polygon is in " + draft.worldId() + ". Stay in that world to use add-point."));
 			return 0;
 		}
-		draft.add(point);
+		draft.add(new DraftPoint(point.x(), operator.blockPosition().getY(), point.z()));
+		visuals.showDraft(operator, draft);
 		source.sendSuccess(() -> Component.literal("Added " + point.x() + ", " + point.z() + " (" + draft.size() + " points)."), false);
 		return 1;
 	}
 
-	private static int finish(CommandSourceStack source, ArowsConfig config, PolygonStore store, Pl3xMapBridge bridge, String name) {
+	private static int undo(CommandSourceStack source, PolygonStore store, PolygonVisuals visuals) {
+		ServerPlayer operator = operator(source);
+		if (operator == null) {
+			return 0;
+		}
+		PolygonDraft draft = store.draftFor(operator.getUUID());
+		if (draft == null || draft.size() == 0) {
+			source.sendFailure(Component.literal("You do not have a point for undo-point."));
+			return 0;
+		}
+		draft.removeLast();
+		if (draft.size() == 0) {
+			store.removeDraft(operator.getUUID());
+			visuals.clearDraft(operator.getUUID());
+			source.sendSuccess(() -> Component.literal("Removed the last point and cancelled the in-progress polygon."), false);
+			return 1;
+		}
+		visuals.showDraft(operator, draft);
+		source.sendSuccess(() -> Component.literal("Removed the last point (" + draft.size() + " points left)."), false);
+		return 1;
+	}
+
+	private static int finish(CommandSourceStack source, ArowsConfig config, PolygonStore store, Pl3xMapBridge bridge, PolygonVisuals visuals, String name) {
 		ServerPlayer operator = operator(source);
 		if (operator == null) {
 			return 0;
@@ -321,7 +459,7 @@ public final class MapPolygonCommands {
 			source.sendFailure(Component.literal(draft.ownerName() + " already has " + max + " polygons."));
 			return 0;
 		}
-		SavedPolygon polygon = new SavedPolygon(draft.ownerId(), draft.ownerName(), name, draft.worldId(), draft.color(), draft.points());
+		SavedPolygon polygon = new SavedPolygon(draft.ownerId(), draft.ownerName(), name, draft.worldId(), draft.color(), draft.mapPoints());
 		boolean shown;
 		try {
 			shown = bridge.show(polygon);
@@ -332,24 +470,30 @@ public final class MapPolygonCommands {
 		}
 		try {
 			store.add(polygon);
-			store.removeDraft(operator.getUUID());
-			ArowsMod.info("{} created polygon {} for {} in {} ({} points).",
-					source.getTextName(), name, draft.ownerName(), draft.worldId(), polygon.points().size());
-			if (shown) {
-				source.sendSuccess(() -> Component.literal("Created " + name + " for " + draft.ownerName() + " on the ArowsMod map layer."), false);
-			} else {
-				source.sendSuccess(() -> Component.literal("Saved " + name + " for " + draft.ownerName() + ". Pl3xMap is not showing " + draft.worldId() + " yet; the marker will be registered when that world loads."), false);
-				ArowsMod.warn("World {} is not on Pl3xMap yet.", draft.worldId());
-			}
-			return 1;
 		} catch (RuntimeException exception) {
+			try {
+				bridge.hide(polygon);
+			} catch (RuntimeException rollback) {
+				exception.addSuppressed(rollback);
+			}
 			ArowsMod.warn("Could not save polygons.json after creating {} for {}.", name, draft.ownerName(), exception);
 			source.sendFailure(Component.literal("Could not save this polygon: " + exception.getMessage()));
 			return 0;
 		}
+		store.removeDraft(operator.getUUID());
+		visuals.clearDraft(operator.getUUID());
+		ArowsMod.info("{} created polygon {} for {} in {} ({} points).",
+				source.getTextName(), name, draft.ownerName(), draft.worldId(), polygon.points().size());
+		if (shown) {
+			source.sendSuccess(() -> Component.literal("Created " + name + " for " + draft.ownerName() + " on the ArowsMod map layer."), false);
+		} else {
+			source.sendSuccess(() -> Component.literal("Saved " + name + " for " + draft.ownerName() + ". Pl3xMap is not showing " + draft.worldId() + " yet; the marker will be registered when that world loads."), false);
+			ArowsMod.warn("World {} is not on Pl3xMap yet.", draft.worldId());
+		}
+		return 1;
 	}
 
-	private static int cancel(CommandSourceStack source, PolygonStore store) {
+	private static int cancel(CommandSourceStack source, PolygonStore store, PolygonVisuals visuals) {
 		ServerPlayer operator = operator(source);
 		if (operator == null) {
 			return 0;
@@ -359,6 +503,7 @@ public final class MapPolygonCommands {
 			source.sendFailure(Component.literal("You do not have an in-progress polygon."));
 			return 0;
 		}
+		visuals.clearDraft(operator.getUUID());
 		source.sendSuccess(() -> Component.literal("Cancelled the in-progress polygon for " + draft.ownerName() + "."), false);
 		return 1;
 	}
@@ -385,8 +530,201 @@ public final class MapPolygonCommands {
 		return owned.size();
 	}
 
+	private static int listPoints(CommandSourceStack source, PolygonStore store, Collection<NameAndId> profiles, String name) {
+		NameAndId owner = onePlayer(source, profiles);
+		if (owner == null) {
+			return 0;
+		}
+		SavedPolygon polygon = store.find(owner.id(), name).orElse(null);
+		if (polygon == null) {
+			source.sendFailure(Component.literal(owner.name() + " has no polygon named " + name + "."));
+			return 0;
+		}
+		StringBuilder message = new StringBuilder(polygon.name());
+		int index = 1;
+		for (MapPoint point : polygon.points()) {
+			message.append('\n').append(index).append(": ").append(point.x()).append(", ").append(point.z());
+			index++;
+		}
+		source.sendSuccess(() -> Component.literal(message.toString()), false);
+		return polygon.points().size();
+	}
+
+	private static int show(CommandSourceStack source, PolygonStore store, PolygonVisuals visuals, Collection<NameAndId> profiles, String name, Integer y) {
+		ServerPlayer operator = source.getPlayer();
+		if (operator == null && y == null) {
+			source.sendFailure(Component.literal("The console has to pass a Y: /arowsmod map polygon show <player> <name> <y>."));
+			return 0;
+		}
+		NameAndId owner = onePlayer(source, profiles);
+		if (owner == null) {
+			return 0;
+		}
+		SavedPolygon polygon = store.find(owner.id(), name).orElse(null);
+		if (polygon == null) {
+			source.sendFailure(Component.literal(owner.name() + " has no polygon named " + name + "."));
+			return 0;
+		}
+		int height = y == null ? operator.blockPosition().getY() : y;
+		UUID viewer = operator == null ? PolygonVisuals.CONSOLE_VIEWER : operator.getUUID();
+		List<Integer> skipped = visuals.showSaved(source.getServer(), viewer, polygon, height);
+		if (skipped == null) {
+			source.sendFailure(Component.literal("Pl3xMap world " + polygon.worldId() + " is not loaded."));
+			return 0;
+		}
+		if (skipped.size() == polygon.points().size()) {
+			source.sendFailure(Component.literal("No points of " + polygon.name() + " are in a loaded chunk."));
+			return 0;
+		}
+		StringBuilder message = new StringBuilder("Showing ").append(polygon.name()).append(" for ").append(owner.name()).append(" at Y ").append(height).append(". It hides after 3 minutes.");
+		if (!skipped.isEmpty()) {
+			message.append(" Skipped points ");
+			for (int index = 0; index < skipped.size(); index++) {
+				if (index > 0) {
+					message.append(", ");
+				}
+				message.append(skipped.get(index));
+			}
+			message.append(" because those chunks are not loaded.");
+		}
+		source.sendSuccess(() -> Component.literal(message.toString()), false);
+		return 1;
+	}
+
+	private static int hide(CommandSourceStack source, PolygonVisuals visuals) {
+		ServerPlayer operator = source.getPlayer();
+		visuals.clearShow(operator == null ? PolygonVisuals.CONSOLE_VIEWER : operator.getUUID());
+		source.sendSuccess(() -> Component.literal("Hid the polygon preview."), false);
+		return 1;
+	}
+
+	private static int insertHere(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, PolygonVisuals visuals, Collection<NameAndId> profiles, String name, int index) {
+		MapPoint point = here(source);
+		if (point == null) {
+			return 0;
+		}
+		return insert(source, store, bridge, visuals, profiles, name, index, point.x(), point.z());
+	}
+
+	private static int insert(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, PolygonVisuals visuals, Collection<NameAndId> profiles, String name, int index, int x, int z) {
+		return changePoints(source, store, bridge, visuals, profiles, name, index, "inserted", points -> {
+			if (index > points.size() + 1) {
+				return "Point index must be from 1 to " + (points.size() + 1) + ".";
+			}
+			points.add(index - 1, new MapPoint(x, z));
+			return null;
+		});
+	}
+
+	private static int editHere(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, PolygonVisuals visuals, Collection<NameAndId> profiles, String name, int index) {
+		MapPoint point = here(source);
+		if (point == null) {
+			return 0;
+		}
+		return edit(source, store, bridge, visuals, profiles, name, index, point.x(), point.z());
+	}
+
+	private static MapPoint here(CommandSourceStack source) {
+		if (source.getPlayer() == null) {
+			source.sendFailure(Component.literal("The console has no position, so it must pass <x> <z>."));
+			return null;
+		}
+		Point point = Point.of(source.getPosition().x(), source.getPosition().z());
+		return new MapPoint(point.x(), point.z());
+	}
+
+	private static int edit(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, PolygonVisuals visuals, Collection<NameAndId> profiles, String name, int index, int x, int z) {
+		return changePoints(source, store, bridge, visuals, profiles, name, index, "moved", points -> {
+			if (index > points.size()) {
+				return "Point index must be from 1 to " + points.size() + ".";
+			}
+			points.set(index - 1, new MapPoint(x, z));
+			return null;
+		});
+	}
+
+	private static int delete(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, PolygonVisuals visuals, Collection<NameAndId> profiles, String name, int index) {
+		return changePoints(source, store, bridge, visuals, profiles, name, index, "deleted", points -> {
+			if (index > points.size()) {
+				return "Point index must be from 1 to " + points.size() + ".";
+			}
+			if (points.size() <= 3) {
+				return "A polygon needs at least 3 points.";
+			}
+			points.remove(index - 1);
+			return null;
+		});
+	}
+
+	private static int changePoints(
+			CommandSourceStack source,
+			PolygonStore store,
+			Pl3xMapBridge bridge,
+			PolygonVisuals visuals,
+			Collection<NameAndId> profiles,
+			String name,
+			int index,
+			String action,
+			PointChange change
+	) {
+		NameAndId owner = onePlayer(source, profiles);
+		if (owner == null) {
+			return 0;
+		}
+		SavedPolygon polygon = store.find(owner.id(), name).orElse(null);
+		if (polygon == null) {
+			source.sendFailure(Component.literal(owner.name() + " has no polygon named " + name + "."));
+			return 0;
+		}
+		List<MapPoint> points = new ArrayList<>(polygon.points());
+		String rejected = change.apply(points);
+		if (rejected != null) {
+			source.sendFailure(Component.literal(rejected));
+			return 0;
+		}
+		SavedPolygon updated = new SavedPolygon(polygon.ownerId(), polygon.ownerName(), polygon.name(), polygon.worldId(), polygon.color(), List.copyOf(points));
+		try {
+			if (!bridge.show(updated)) {
+				ArowsMod.warn("World {} is not on Pl3xMap yet.", polygon.worldId());
+				source.sendFailure(Component.literal("Pl3xMap is not showing " + polygon.worldId() + " yet, so this point was not saved."));
+				return 0;
+			}
+		} catch (RuntimeException exception) {
+			try {
+				bridge.show(polygon);
+			} catch (RuntimeException rollback) {
+				exception.addSuppressed(rollback);
+			}
+			ArowsMod.warn("Could not update marker {} for {} in {}.", polygon.name(), owner.name(), polygon.worldId(), exception);
+			source.sendFailure(Component.literal("Pl3xMap could not update this polygon: " + exception.getMessage()));
+			return 0;
+		}
+		try {
+			store.replace(polygon, updated);
+		} catch (RuntimeException exception) {
+			try {
+				bridge.show(polygon);
+			} catch (RuntimeException rollback) {
+				exception.addSuppressed(rollback);
+			}
+			ArowsMod.warn("Could not save polygons.json after editing {} for {}.", polygon.name(), owner.name(), exception);
+			source.sendFailure(Component.literal("Could not save this polygon: " + exception.getMessage()));
+			return 0;
+		}
+		visuals.refresh(updated, source.getServer());
+		ArowsMod.info("{} {} point {} on polygon {} for {} in {} ({} points).",
+				source.getTextName(), action, index, polygon.name(), owner.name(), polygon.worldId(), updated.points().size());
+		source.sendSuccess(() -> Component.literal("Updated " + polygon.name() + " for " + owner.name() + " (" + updated.points().size() + " points)."), false);
+		return 1;
+	}
+
+	@FunctionalInterface
+	private interface PointChange {
+		String apply(List<MapPoint> points);
+	}
+
 	/** The file is updated only after the map marker is replaced. A failed save puts the old marker back. */
-	private static int rename(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, Collection<NameAndId> profiles, String name, String newName) {
+	private static int rename(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, Collection<NameAndId> profiles, String name, String newName, PolygonVisuals visuals) {
 		NameAndId owner = onePlayer(source, profiles);
 		if (owner == null) {
 			return 0;
@@ -427,11 +765,12 @@ public final class MapPolygonCommands {
 		}
 		ArowsMod.info("{} renamed polygon {} to {} for {} in {} ({} points).",
 				source.getTextName(), polygon.name(), newName, owner.name(), polygon.worldId(), polygon.points().size());
+		visuals.renamed(polygon.ownerId(), polygon.name(), newName);
 		source.sendSuccess(() -> Component.literal("Renamed " + polygon.name() + " to " + newName + " for " + owner.name() + "."), false);
 		return 1;
 	}
 
-	private static int remove(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, Collection<NameAndId> profiles, String name) {
+	private static int remove(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, Collection<NameAndId> profiles, String name, PolygonVisuals visuals) {
 		NameAndId owner = onePlayer(source, profiles);
 		if (owner == null) {
 			return 0;
@@ -449,6 +788,7 @@ public final class MapPolygonCommands {
 			return 0;
 		}
 		store.remove(polygon);
+		visuals.removed(polygon.ownerId(), polygon.name());
 		ArowsMod.info("{} removed polygon {} for {} in {} ({} points).",
 				source.getTextName(), polygon.name(), owner.name(), polygon.worldId(), polygon.points().size());
 		source.sendSuccess(() -> Component.literal("Removed " + polygon.name() + " from " + owner.name() + "."), false);
