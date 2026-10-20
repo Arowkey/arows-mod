@@ -45,8 +45,8 @@ public final class MapPolygonCommands {
 
 	/**
 	 * Every polygon command and {@code /arowsmod reload} require operator permission
-	 * ({@link Permissions#COMMANDS_GAMEMASTER}, level 2). Start, add, undo, finish, cancel, show,
-	 * hide, and edit without coordinates need a player position. The other polygon commands can run
+	 * ({@link Permissions#COMMANDS_GAMEMASTER}, level 2). Start, add-point, undo, finish, cancel, show,
+	 * hide, and edit-point without coordinates need a player position. The other polygon commands can run
 	 * from the console.
 	 */
 
@@ -88,7 +88,7 @@ public final class MapPolygonCommands {
 																profiles(context),
 																com.mojang.brigadier.arguments.StringArgumentType.getString(context, "color")
 														)))))
-								.then(Commands.literal("add")
+								.then(Commands.literal("add-point")
 										.executes(context -> addHere(context.getSource(), store, visuals))
 										.then(Commands.argument("x", IntegerArgumentType.integer())
 												.then(Commands.argument("z", IntegerArgumentType.integer())
@@ -135,7 +135,7 @@ public final class MapPolygonCommands {
 																profiles(context),
 																com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name")
 														)))))
-								.then(Commands.literal("insert")
+								.then(Commands.literal("insert-point")
 										.then(Commands.argument("player", GameProfileArgument.gameProfile())
 												.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
 														.then(Commands.argument("index", IntegerArgumentType.integer(1))
@@ -152,7 +152,7 @@ public final class MapPolygonCommands {
 																						IntegerArgumentType.getInteger(context, "x"),
 																						IntegerArgumentType.getInteger(context, "z")
 																				))))))))
-								.then(Commands.literal("edit")
+								.then(Commands.literal("edit-point")
 										.then(Commands.argument("player", GameProfileArgument.gameProfile())
 												.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
 														.then(Commands.argument("index", IntegerArgumentType.integer(1))
@@ -178,7 +178,7 @@ public final class MapPolygonCommands {
 																						IntegerArgumentType.getInteger(context, "x"),
 																						IntegerArgumentType.getInteger(context, "z")
 																				))))))))
-								.then(Commands.literal("delete")
+								.then(Commands.literal("remove-point")
 										.then(Commands.argument("player", GameProfileArgument.gameProfile())
 												.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
 														.then(Commands.argument("index", IntegerArgumentType.integer(1))
@@ -222,9 +222,9 @@ public final class MapPolygonCommands {
 				.withClickEvent(new ClickEvent.OpenUrl(URI.create("https://github.com/Arowkey/arows-mod")))
 				.withUnderlined(true));
 		Component message = Component.literal("Operators draw Pl3xMap polygons for a player.\n"
-				+ "First polygon: /arowsmod map polygon start <player> <RRGGBB>, then add, then finish <name>.\n"
+				+ "First polygon: /arowsmod map polygon start <player> <RRGGBB>, then add-point, then finish <name>.\n"
 				+ "undo removes the last point. cancel drops the one in progress. show and hide preview a saved polygon.\n"
-				+ "Later: list, list <player> <name>, color, rename, remove, insert, edit, and delete.\n"
+				+ "Later: list, list <player> <name>, color, rename, remove, insert-point, edit-point, and remove-point.\n"
 				+ "Colors are six hex digits with no #.\n"
 				+ "More detail: ").append(link);
 		source.sendSuccess(() -> message, false);
@@ -375,12 +375,12 @@ public final class MapPolygonCommands {
 		ServerPlayer operator = source.getPlayer();
 		PolygonDraft draft = store.draftFor(operator.getUUID());
 		if (draft == null) {
-			source.sendFailure(Component.literal("Start a polygon before adding points."));
+			source.sendFailure(Component.literal("Start a polygon before using add-point."));
 			return 0;
 		}
 		String worldId = source.getLevel().dimension().identifier().toString();
 		if (!draft.worldId().equals(worldId)) {
-			source.sendFailure(Component.literal("This polygon is in " + draft.worldId() + ". Stay in that world to add points."));
+			source.sendFailure(Component.literal("This polygon is in " + draft.worldId() + ". Stay in that world to use add-point."));
 			return 0;
 		}
 		draft.add(new DraftPoint(point.x(), operator.blockPosition().getY(), point.z()));

@@ -10,9 +10,6 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtOps;
-import net.minecraft.nbt.NbtUtils;
-import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentSerialization;
 import net.minecraft.resources.Identifier;
@@ -26,12 +23,16 @@ import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.storage.TagValueInput;
+import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
+import org.joml.Vector3fc;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -48,6 +49,8 @@ public final class PolygonVisuals {
 	private static final int SHOW_TICKS = 3 * 60 * 20;
 	private static final float CORNER_SIZE = 0.35f;
 	private static final float EDGE_THICKNESS = 0.12f;
+	/** Multiplied by 64 in the client, so 2 is about 128 blocks. */
+	private static final float VIEW_RANGE = 2f;
 
 	private final Map<UUID, List<Display>> drafts = new ConcurrentHashMap<>();
 	private final Map<UUID, Shown> shows = new ConcurrentHashMap<>();
@@ -213,19 +216,26 @@ public final class PolygonVisuals {
 
 	private List<Display> spawn(ServerLevel level, List<MarkerPoint> points) {
 		List<Display> entities = new ArrayList<>();
+		String failure = null;
+		boolean tried = false;
 		int count = points.size();
 		for (int index = 0; index < count; index++) {
 			MarkerPoint point = points.get(index);
 			if (point == null) {
 				continue;
 			}
-			Display corner = blockDisplay(level, point.x() + 0.5, point.y(), point.z() + 0.5, cornerBlock(index, count), cornerTransformation());
-			if (corner != null) {
-				entities.add(corner);
+			tried = true;
+			Placed corner = blockDisplay(level, point.x() + 0.5, point.y(), point.z() + 0.5, cornerBlock(index, count), cornerTransformation());
+			if (corner.entity != null) {
+				entities.add(corner.entity);
+			} else {
+				failure = firstFailure(failure, corner.failure);
 			}
-			Display label = textDisplay(level, point.x() + 0.5, point.y() + 0.55, point.z() + 0.5, Integer.toString(index + 1));
-			if (label != null) {
-				entities.add(label);
+			Placed label = textDisplay(level, point.x() + 0.5, point.y() + 0.55, point.z() + 0.5, Integer.toString(index + 1));
+			if (label.entity != null) {
+				entities.add(label.entity);
+			} else {
+				failure = firstFailure(failure, label.failure);
 			}
 		}
 		if (count >= 2) {
@@ -235,13 +245,23 @@ public final class PolygonVisuals {
 				if (from == null || to == null) {
 					continue;
 				}
-				Display edge = edgeDisplay(level, from, to);
-				if (edge != null) {
-					entities.add(edge);
+				tried = true;
+				Placed edge = edgeDisplay(level, from, to);
+				if (edge.entity != null) {
+					entities.add(edge.entity);
+				} else if (edge.failure != null) {
+					failure = firstFailure(failure, edge.failure);
 				}
 			}
 		}
+		if (tried && entities.isEmpty()) {
+			ArowsMod.warn("Could not show polygon displays: {}.", failure == null ? "no entities were added" : failure);
+		}
 		return entities;
+	}
+
+	private static String firstFailure(String current, String next) {
+		return current == null ? next : current;
 	}
 
 	private static Block cornerBlock(int index, int count) {
@@ -259,13 +279,13 @@ public final class PolygonVisuals {
 		return new Transformation(new Vector3f(offset, 0f, offset), new Quaternionf(), new Vector3f(CORNER_SIZE, CORNER_SIZE, CORNER_SIZE), new Quaternionf());
 	}
 
-	private static Display edgeDisplay(ServerLevel level, MarkerPoint from, MarkerPoint to) {
+	private static Placed edgeDisplay(ServerLevel level, MarkerPoint from, MarkerPoint to) {
 		float dx = to.x() - from.x();
 		float dy = to.y() - from.y();
 		float dz = to.z() - from.z();
 		float length = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
 		if (length < 0.001f) {
-			return null;
+			return Placed.skipped();
 		}
 		Vector3f direction = new Vector3f(dx, dy, dz).normalize();
 		Quaternionf rotation = new Quaternionf().rotationTo(new Vector3f(0f, 1f, 0f), direction);
@@ -274,58 +294,110 @@ public final class PolygonVisuals {
 		return blockDisplay(level, from.x() + 0.5, from.y(), from.z() + 0.5, Blocks.CONCRETE.lightBlue(), transformation);
 	}
 
-	private static Display blockDisplay(ServerLevel level, double x, double y, double z, Block block, Transformation transformation) {
-		Display display = new Display.BlockDisplay(EntityTypes.BLOCK_DISPLAY, level);
+	private static Placed blockDisplay(ServerLevel level, double x, double y, double z, Block block, Transformation transformation) {
+		BlockState state = block.defaultBlockState();
+		if (state.isAir()) {
+			return Placed.failed("the block display has no block");
+		}
+		Display.BlockDisplay display = new Display.BlockDisplay(EntityTypes.BLOCK_DISPLAY, level);
+		TagValueOutput output = displayData(level.registryAccess(), x, y, z, transformation);
+		output.store("block_state", BlockState.CODEC, state);
+		return place(level, display, x, y, z, output.buildResult(), "block");
+	}
+
+	private static Placed textDisplay(ServerLevel level, double x, double y, double z, String text) {
+		Display.TextDisplay display = new Display.TextDisplay(EntityTypes.TEXT_DISPLAY, level);
+		Transformation transformation = new Transformation(new Vector3f(-0.15f, 0f, -0.15f), new Quaternionf(), new Vector3f(0.5f, 0.5f, 0.5f), new Quaternionf());
+		TagValueOutput output = displayData(level.registryAccess(), x, y, z, transformation);
+		output.store("text", ComponentSerialization.CODEC, Component.literal(text));
+		output.store("billboard", Display.BillboardConstraints.CODEC, Display.BillboardConstraints.CENTER);
+		return place(level, display, x, y, z, output.buildResult(), "text");
+	}
+
+	/**
+	 * Writes the tags Display and the entity load path actually read.
+	 * Position has to be in the tag: load replaces a missing Pos with the world origin.
+	 */
+	private static TagValueOutput displayData(RegistryAccess registries, double x, double y, double z, Transformation transformation) {
+		TagValueOutput output = TagValueOutput.createWithContext(ProblemReporter.DISCARDING, registries);
+		output.store("Pos", Vec3.CODEC, new Vec3(x, y, z));
+		output.store("transformation", Transformation.EXTENDED_CODEC, transformation);
+		output.putFloat("view_range", VIEW_RANGE);
+		output.putFloat("shadow_radius", 0f);
+		output.putBoolean("NoGravity", true);
+		return output;
+	}
+
+	private static Placed place(ServerLevel level, Display display, double x, double y, double z, CompoundTag data, String kind) {
+		String loaded = load(display, level.registryAccess(), data);
+		if (loaded != null) {
+			return Placed.failed(loaded);
+		}
+		// load() already applied Pos. Set it again so a discarded Pos tag cannot leave the entity at the origin.
 		display.setPos(x, y, z);
-		CompoundTag data = new CompoundTag();
-		data.put("block_state", NbtUtils.writeBlockState(block.defaultBlockState()));
-		data.put("transformation", transformationTag(transformation));
-		data.putFloat("shadow_radius", 0f);
-		data.putFloat("view_range", 2f);
-		if (!load(display, level.registryAccess(), data)) {
-			return null;
+		if (!near(display.getX(), x) || !near(display.getY(), y) || !near(display.getZ(), z)) {
+			return Placed.failed("the " + kind + " display stayed at "
+					+ display.getX() + ", " + display.getY() + ", " + display.getZ()
+					+ " instead of the marker");
+		}
+		String invalid = invalidDisplay(display, level.registryAccess(), kind);
+		if (invalid != null) {
+			return Placed.failed(invalid);
+		}
+		if (display.level() != level) {
+			return Placed.failed("the " + kind + " display was created in the wrong world");
+		}
+		int chunkX = SectionPos.blockToSectionCoord(display.blockPosition().getX());
+		int chunkZ = SectionPos.blockToSectionCoord(display.blockPosition().getZ());
+		if (!level.getChunkSource().hasChunk(chunkX, chunkZ)) {
+			return Placed.failed("the chunk for the " + kind + " display is not loaded");
 		}
 		if (!level.addFreshEntity(display)) {
-			return null;
+			return Placed.failed("the world did not add the " + kind + " display");
 		}
-		return display;
+		if (display.isRemoved()) {
+			return Placed.failed("the " + kind + " display was removed on the same tick");
+		}
+		return new Placed(display, null);
 	}
 
-	private static Display textDisplay(ServerLevel level, double x, double y, double z, String text) {
-		Display display = new Display.TextDisplay(EntityTypes.TEXT_DISPLAY, level);
-		display.setPos(x, y, z);
-		CompoundTag data = new CompoundTag();
-		RegistryAccess registries = level.registryAccess();
-		Tag encoded = ComponentSerialization.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), Component.literal(text)).result().orElse(null);
-		if (encoded == null) {
-			return null;
+	private static String invalidDisplay(Display display, RegistryAccess registries, String kind) {
+		TagValueOutput output = TagValueOutput.createWithContext(ProblemReporter.DISCARDING, registries);
+		display.saveWithoutId(output);
+		ValueInput input = TagValueInput.create(ProblemReporter.DISCARDING, registries, output.buildResult());
+		if (input.getFloatOr("view_range", 0f) <= 0f) {
+			return "the " + kind + " display view range is zero";
 		}
-		data.put("text", encoded);
-		data.putString("billboard", "center");
-		data.put("transformation", transformationTag(new Transformation(new Vector3f(-0.15f, 0f, -0.15f), new Quaternionf(), new Vector3f(0.5f, 0.5f, 0.5f), new Quaternionf())));
-		data.putFloat("shadow_radius", 0f);
-		data.putFloat("view_range", 2f);
-		if (!load(display, registries, data)) {
-			return null;
+		Transformation transformation = input.read("transformation", Transformation.EXTENDED_CODEC).orElse(Transformation.IDENTITY);
+		Vector3fc scale = transformation.scale();
+		if (Math.abs(scale.x()) < 0.001f || Math.abs(scale.y()) < 0.001f || Math.abs(scale.z()) < 0.001f) {
+			return "the " + kind + " display scale is zero";
 		}
-		if (!level.addFreshEntity(display)) {
-			return null;
+		if (display instanceof Display.BlockDisplay) {
+			BlockState state = input.read("block_state", BlockState.CODEC).orElse(Blocks.AIR.defaultBlockState());
+			if (state.isAir()) {
+				return "the block display has no block";
+			}
 		}
-		return display;
+		if (display instanceof Display.TextDisplay && input.read("text", ComponentSerialization.CODEC).isEmpty()) {
+			return "the text display has no text";
+		}
+		return null;
 	}
 
-	private static Tag transformationTag(Transformation transformation) {
-		return Transformation.CODEC.encodeStart(NbtOps.INSTANCE, transformation).getOrThrow();
+	private static boolean near(double actual, double expected) {
+		return Math.abs(actual - expected) < 0.01;
 	}
 
-	private static boolean load(Display display, RegistryAccess registries, CompoundTag data) {
+	/** Returns a reason when the entity could not be loaded. */
+	private static String load(Display display, RegistryAccess registries, CompoundTag data) {
 		try {
 			ValueInput input = TagValueInput.create(ProblemReporter.DISCARDING, registries, data);
 			display.load(input);
-			return true;
+			return null;
 		} catch (RuntimeException exception) {
-			ArowsMod.warn("Could not create a polygon point display.", exception);
-			return false;
+			String message = exception.getMessage();
+			return message == null ? "could not read the display data" : "could not read the display data: " + message;
 		}
 	}
 
@@ -348,6 +420,17 @@ public final class PolygonVisuals {
 	}
 
 	private record MarkerPoint(int x, int y, int z) {
+	}
+
+	/** A display that was added, a spawn that was not attempted, or the reason nothing was added. */
+	private record Placed(Display entity, String failure) {
+		private static Placed failed(String failure) {
+			return new Placed(null, failure);
+		}
+
+		private static Placed skipped() {
+			return new Placed(null, null);
+		}
 	}
 
 	private static final class Shown {
