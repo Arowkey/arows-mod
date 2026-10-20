@@ -23,7 +23,7 @@ The first start creates `config/arowsmod.json` and, after the first saved polygo
 
 Every ArowsMod command requires operator permission (permission level 2).
 
-`start`, `add-point`, `undo`, `finish`, `cancel`, `show` without a Y, and `insert-point` or `edit-point` without coordinates also need a player in a world, because they use that operator's position. The console cannot run those. `show <player> <name> <y>`, `hide`, `list`, `insert-point` and `edit-point` with coordinates, `remove-point`, `remove`, `rename`, `color`, `help`, and `reload` can be run by any level-2 source, including the console. Console `hide` removes the preview the console is showing.
+`start`, `add-point`, `undo-point`, `finish`, `cancel`, `show` without a Y, and `insert-point` or `edit-point` without coordinates also need a player in a world, because they use that operator's position. The console cannot run those. `show <player> <name> <y>`, `hide`, `list`, `insert-point` and `edit-point` with coordinates, `remove-point`, `remove`, `rename`, `color`, `help`, and `reload` can be run by any level-2 source, including the console. Console `hide` removes the preview the console is showing.
 
 `/arowsmod map polygon help`, or `/arowsmod map polygon` with nothing after it, prints a short reminder in chat and links to this page.
 
@@ -45,10 +45,10 @@ Stand in the world where the polygon belongs, then:
 While you are creating a polygon, corners and edges are shown with block displays, including the edge that closes back to the first point. That closing edge is magenta concrete. The other edges are light blue concrete. The number at each corner is that point's index, starting at 1, centered above the corner. The first corner is lime, the latest corner is orange, and the corners between them are white. Nearby players can see these displays. They are not saved with the world.
 
 ```
-/arowsmod map polygon undo
+/arowsmod map polygon undo-point
 ```
 
-`undo` removes the last point and updates the displays. If that was the only point, the in-progress polygon is cancelled.
+`undo-point` removes the last point and updates the displays. If that was the only point, the in-progress polygon is cancelled.
 
 `finish <name>` saves the polygon under that name for the player you started it for and removes the in-progress displays. The name is one word. That player cannot already have a polygon with the same name, ignoring case. In-progress polygons do not count toward the per-player cap.
 

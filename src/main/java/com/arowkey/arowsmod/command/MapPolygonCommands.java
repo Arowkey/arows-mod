@@ -46,7 +46,7 @@ public final class MapPolygonCommands {
 
 	/**
 	 * Every polygon command and {@code /arowsmod reload} require operator permission
-	 * ({@link Permissions#COMMANDS_GAMEMASTER}, level 2). Start, add-point, undo, finish, cancel,
+	 * ({@link Permissions#COMMANDS_GAMEMASTER}, level 2). Start, add-point, undo-point, finish, cancel,
 	 * show without a Y, and insert-point or edit-point without coordinates need a player position.
 	 * Show with a Y, hide, and the other polygon commands can run from the console.
 	 */
@@ -100,7 +100,7 @@ public final class MapPolygonCommands {
 																IntegerArgumentType.getInteger(context, "x"),
 																IntegerArgumentType.getInteger(context, "z")
 														)))))
-								.then(Commands.literal("undo")
+								.then(Commands.literal("undo-point")
 										.executes(context -> undo(context.getSource(), store, visuals)))
 								.then(Commands.literal("finish")
 										.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
@@ -243,7 +243,7 @@ public final class MapPolygonCommands {
 				.withUnderlined(true));
 		Component message = Component.literal("Operators draw Pl3xMap polygons for a player.\n"
 				+ "First polygon: /arowsmod map polygon start <player> <RRGGBB>, then add-point, then finish <name>.\n"
-				+ "undo removes the last point. cancel drops the one in progress.\n"
+				+ "undo-point removes the last point. cancel drops the one in progress.\n"
 				+ "show <player> <name> previews a saved polygon at your Y. show <player> <name> <y> uses that height. The console has to pass <y>.\n"
 				+ "Later: list, list <player> <name>, color, rename, remove, insert-point, edit-point, and remove-point.\n"
 				+ "insert-point and edit-point use your x and z when coordinates are left out. The console has to pass <x> <z>.\n"
@@ -418,7 +418,7 @@ public final class MapPolygonCommands {
 		}
 		PolygonDraft draft = store.draftFor(operator.getUUID());
 		if (draft == null || draft.size() == 0) {
-			source.sendFailure(Component.literal("You do not have a point to undo."));
+			source.sendFailure(Component.literal("You do not have a point for undo-point."));
 			return 0;
 		}
 		draft.removeLast();
