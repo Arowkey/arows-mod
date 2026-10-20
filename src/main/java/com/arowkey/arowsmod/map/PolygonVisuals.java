@@ -295,7 +295,8 @@ public final class PolygonVisuals {
 		Quaternionf rotation = new Quaternionf().rotationTo(new Vector3f(0f, 1f, 0f), direction);
 		Vector3f offset = rotation.transform(new Vector3f(-EDGE_THICKNESS / 2f, 0f, -EDGE_THICKNESS / 2f));
 		Transformation transformation = new Transformation(offset, rotation, new Vector3f(EDGE_THICKNESS, length, EDGE_THICKNESS), new Quaternionf());
-		return blockDisplay(level, from.x() + 0.5, from.y(), from.z() + 0.5, block, transformation);
+		double centerY = from.y() + CORNER_SIZE / 2.0;
+		return blockDisplay(level, from.x() + 0.5, centerY, from.z() + 0.5, block, transformation);
 	}
 
 	private static Placed blockDisplay(ServerLevel level, double x, double y, double z, Block block, Transformation transformation) {
