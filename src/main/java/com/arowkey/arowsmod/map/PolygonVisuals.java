@@ -25,7 +25,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.world.level.storage.ValueInput;
@@ -46,8 +45,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * They are discarded instead of saved, including when their chunk unloads.
  */
 public final class PolygonVisuals {
+	/** Viewer id for a preview started from the server console. */
+	public static final UUID CONSOLE_VIEWER = new UUID(0L, 0L);
 	private static final int SHOW_TICKS = 3 * 60 * 20;
-	private static final float CORNER_SIZE = 0.35f;
+	private static final float CORNER_SIZE = 0.5f;
+	private static final float TEXT_SCALE = 0.7f;
+	private static final float TEXT_GAP = 0.15f;
 	private static final float EDGE_THICKNESS = 0.12f;
 	/** Multiplied by 64 in the client, so 2 is about 128 blocks. */
 	private static final float VIEW_RANGE = 2f;
@@ -75,7 +78,7 @@ public final class PolygonVisuals {
 		for (DraftPoint point : draft.points()) {
 			points.add(new MarkerPoint(point.x(), point.y(), point.z()));
 		}
-		this.drafts.put(operator.getUUID(), this.spawn(operator.level(), points));
+		this.drafts.put(operator.getUUID(), this.spawn(operator.level(), points, true));
 	}
 
 	public void clearDraft(UUID operatorId) {
@@ -83,13 +86,12 @@ public final class PolygonVisuals {
 	}
 
 	/**
-	 * Shows a finished polygon. Y is the top solid block plus one, which is what
-	 * {@link Heightmap.Types#OCEAN_FLOOR} already stores. Unloaded chunks are skipped.
+	 * Shows a finished polygon. Every marker uses the same {@code y}. Unloaded chunks are skipped.
 	 * Returns the 1-based indexes that were skipped, or null when the world is missing.
 	 */
-	public List<Integer> showSaved(ServerPlayer operator, SavedPolygon polygon) {
-		this.clearShow(operator.getUUID());
-		ServerLevel level = level(operator.level().getServer(), polygon.worldId());
+	public List<Integer> showSaved(MinecraftServer server, UUID viewerId, SavedPolygon polygon, int y) {
+		this.clearShow(viewerId);
+		ServerLevel level = level(server, polygon.worldId());
 		if (level == null) {
 			return null;
 		}
@@ -104,12 +106,11 @@ public final class PolygonVisuals {
 				points.add(null);
 				continue;
 			}
-			int y = level.getHeight(Heightmap.Types.OCEAN_FLOOR, point.x(), point.z());
 			points.add(new MarkerPoint(point.x(), y, point.z()));
 		}
-		List<Display> entities = this.spawn(level, points);
+		List<Display> entities = this.spawn(level, points, false);
 		if (!entities.isEmpty()) {
-			this.shows.put(operator.getUUID(), new Shown(polygon.ownerId(), polygon.name(), entities, this.tick + SHOW_TICKS));
+			this.shows.put(viewerId, new Shown(polygon.ownerId(), polygon.name(), y, entities, this.tick + SHOW_TICKS));
 		}
 		return skipped;
 	}
@@ -122,20 +123,22 @@ public final class PolygonVisuals {
 	}
 
 	public void refresh(SavedPolygon polygon, MinecraftServer server) {
-		List<UUID> operators = new ArrayList<>();
+		List<UUID> viewers = new ArrayList<>();
+		List<Integer> heights = new ArrayList<>();
 		for (Map.Entry<UUID, Shown> entry : this.shows.entrySet()) {
 			Shown shown = entry.getValue();
 			if (shown.ownerId.equals(polygon.ownerId()) && shown.name.equalsIgnoreCase(polygon.name())) {
-				operators.add(entry.getKey());
+				viewers.add(entry.getKey());
+				heights.add(shown.y);
 			}
 		}
-		for (UUID operatorId : operators) {
-			ServerPlayer operator = server.getPlayerList().getPlayer(operatorId);
-			if (operator == null) {
-				this.clearShow(operatorId);
+		for (int index = 0; index < viewers.size(); index++) {
+			UUID viewerId = viewers.get(index);
+			if (!viewerId.equals(CONSOLE_VIEWER) && server.getPlayerList().getPlayer(viewerId) == null) {
+				this.clearShow(viewerId);
 				continue;
 			}
-			this.showSaved(operator, polygon);
+			this.showSaved(server, viewerId, polygon, heights.get(index));
 		}
 	}
 
@@ -214,7 +217,7 @@ public final class PolygonVisuals {
 		}
 	}
 
-	private List<Display> spawn(ServerLevel level, List<MarkerPoint> points) {
+	private List<Display> spawn(ServerLevel level, List<MarkerPoint> points, boolean closingEdge) {
 		List<Display> entities = new ArrayList<>();
 		String failure = null;
 		boolean tried = false;
@@ -231,7 +234,7 @@ public final class PolygonVisuals {
 			} else {
 				failure = firstFailure(failure, corner.failure);
 			}
-			Placed label = textDisplay(level, point.x() + 0.5, point.y() + 0.55, point.z() + 0.5, Integer.toString(index + 1));
+			Placed label = textDisplay(level, point.x() + 0.5, point.y() + CORNER_SIZE + TEXT_GAP, point.z() + 0.5, Integer.toString(index + 1));
 			if (label.entity != null) {
 				entities.add(label.entity);
 			} else {
@@ -246,7 +249,8 @@ public final class PolygonVisuals {
 					continue;
 				}
 				tried = true;
-				Placed edge = edgeDisplay(level, from, to);
+				boolean closing = closingEdge && index == count - 1;
+				Placed edge = edgeDisplay(level, from, to, closing ? Blocks.CONCRETE.magenta() : Blocks.CONCRETE.lightBlue());
 				if (edge.entity != null) {
 					entities.add(edge.entity);
 				} else if (edge.failure != null) {
@@ -279,7 +283,7 @@ public final class PolygonVisuals {
 		return new Transformation(new Vector3f(offset, 0f, offset), new Quaternionf(), new Vector3f(CORNER_SIZE, CORNER_SIZE, CORNER_SIZE), new Quaternionf());
 	}
 
-	private static Placed edgeDisplay(ServerLevel level, MarkerPoint from, MarkerPoint to) {
+	private static Placed edgeDisplay(ServerLevel level, MarkerPoint from, MarkerPoint to, Block block) {
 		float dx = to.x() - from.x();
 		float dy = to.y() - from.y();
 		float dz = to.z() - from.z();
@@ -291,7 +295,7 @@ public final class PolygonVisuals {
 		Quaternionf rotation = new Quaternionf().rotationTo(new Vector3f(0f, 1f, 0f), direction);
 		Vector3f offset = rotation.transform(new Vector3f(-EDGE_THICKNESS / 2f, 0f, -EDGE_THICKNESS / 2f));
 		Transformation transformation = new Transformation(offset, rotation, new Vector3f(EDGE_THICKNESS, length, EDGE_THICKNESS), new Quaternionf());
-		return blockDisplay(level, from.x() + 0.5, from.y(), from.z() + 0.5, Blocks.CONCRETE.lightBlue(), transformation);
+		return blockDisplay(level, from.x() + 0.5, from.y(), from.z() + 0.5, block, transformation);
 	}
 
 	private static Placed blockDisplay(ServerLevel level, double x, double y, double z, Block block, Transformation transformation) {
@@ -307,7 +311,7 @@ public final class PolygonVisuals {
 
 	private static Placed textDisplay(ServerLevel level, double x, double y, double z, String text) {
 		Display.TextDisplay display = new Display.TextDisplay(EntityTypes.TEXT_DISPLAY, level);
-		Transformation transformation = new Transformation(new Vector3f(-0.15f, 0f, -0.15f), new Quaternionf(), new Vector3f(0.5f, 0.5f, 0.5f), new Quaternionf());
+		Transformation transformation = new Transformation(new Vector3f(0f, 0f, 0f), new Quaternionf(), new Vector3f(TEXT_SCALE, TEXT_SCALE, TEXT_SCALE), new Quaternionf());
 		TagValueOutput output = displayData(level.registryAccess(), x, y, z, transformation);
 		output.store("text", ComponentSerialization.CODEC, Component.literal(text));
 		output.store("billboard", Display.BillboardConstraints.CODEC, Display.BillboardConstraints.CENTER);
@@ -436,12 +440,14 @@ public final class PolygonVisuals {
 	private static final class Shown {
 		private final UUID ownerId;
 		private String name;
+		private final int y;
 		private final List<Display> entities;
 		private final int expiresAtTick;
 
-		private Shown(UUID ownerId, String name, List<Display> entities, int expiresAtTick) {
+		private Shown(UUID ownerId, String name, int y, List<Display> entities, int expiresAtTick) {
 			this.ownerId = ownerId;
 			this.name = name;
+			this.y = y;
 			this.entities = entities;
 			this.expiresAtTick = expiresAtTick;
 		}

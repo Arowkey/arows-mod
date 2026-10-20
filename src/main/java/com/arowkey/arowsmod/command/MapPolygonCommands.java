@@ -31,6 +31,7 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 public final class MapPolygonCommands {
 	private MapPolygonCommands() {
@@ -45,9 +46,9 @@ public final class MapPolygonCommands {
 
 	/**
 	 * Every polygon command and {@code /arowsmod reload} require operator permission
-	 * ({@link Permissions#COMMANDS_GAMEMASTER}, level 2). Start, add-point, undo, finish, cancel, show,
-	 * hide, and edit-point without coordinates need a player position. The other polygon commands can run
-	 * from the console.
+	 * ({@link Permissions#COMMANDS_GAMEMASTER}, level 2). Start, add-point, undo, finish, cancel,
+	 * show without a Y, and edit-point without coordinates need a player position. Show with a Y,
+	 * hide, and the other polygon commands can run from the console.
 	 */
 
 	private static void register(
@@ -121,8 +122,18 @@ public final class MapPolygonCommands {
 																store,
 																visuals,
 																profiles(context),
-																com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name")
-														)))))
+																com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																null
+														))
+														.then(Commands.argument("y", IntegerArgumentType.integer())
+																.executes(context -> show(
+																		context.getSource(),
+																		store,
+																		visuals,
+																		profiles(context),
+																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																		IntegerArgumentType.getInteger(context, "y")
+																))))))
 								.then(Commands.literal("hide")
 										.executes(context -> hide(context.getSource(), visuals)))
 								.then(Commands.literal("list")
@@ -223,7 +234,8 @@ public final class MapPolygonCommands {
 				.withUnderlined(true));
 		Component message = Component.literal("Operators draw Pl3xMap polygons for a player.\n"
 				+ "First polygon: /arowsmod map polygon start <player> <RRGGBB>, then add-point, then finish <name>.\n"
-				+ "undo removes the last point. cancel drops the one in progress. show and hide preview a saved polygon.\n"
+				+ "undo removes the last point. cancel drops the one in progress.\n"
+				+ "show <player> <name> previews a saved polygon at your Y. show <player> <name> <y> uses that height. The console has to pass <y>.\n"
 				+ "Later: list, list <player> <name>, color, rename, remove, insert-point, edit-point, and remove-point.\n"
 				+ "Colors are six hex digits with no #.\n"
 				+ "More detail: ").append(link);
@@ -520,9 +532,10 @@ public final class MapPolygonCommands {
 		return polygon.points().size();
 	}
 
-	private static int show(CommandSourceStack source, PolygonStore store, PolygonVisuals visuals, Collection<NameAndId> profiles, String name) {
-		ServerPlayer operator = operator(source);
-		if (operator == null) {
+	private static int show(CommandSourceStack source, PolygonStore store, PolygonVisuals visuals, Collection<NameAndId> profiles, String name, Integer y) {
+		ServerPlayer operator = source.getPlayer();
+		if (operator == null && y == null) {
+			source.sendFailure(Component.literal("The console has to pass a Y: /arowsmod map polygon show <player> <name> <y>."));
 			return 0;
 		}
 		NameAndId owner = onePlayer(source, profiles);
@@ -534,7 +547,9 @@ public final class MapPolygonCommands {
 			source.sendFailure(Component.literal(owner.name() + " has no polygon named " + name + "."));
 			return 0;
 		}
-		List<Integer> skipped = visuals.showSaved(operator, polygon);
+		int height = y == null ? operator.blockPosition().getY() : y;
+		UUID viewer = operator == null ? PolygonVisuals.CONSOLE_VIEWER : operator.getUUID();
+		List<Integer> skipped = visuals.showSaved(source.getServer(), viewer, polygon, height);
 		if (skipped == null) {
 			source.sendFailure(Component.literal("Pl3xMap world " + polygon.worldId() + " is not loaded."));
 			return 0;
@@ -543,7 +558,7 @@ public final class MapPolygonCommands {
 			source.sendFailure(Component.literal("No points of " + polygon.name() + " are in a loaded chunk."));
 			return 0;
 		}
-		StringBuilder message = new StringBuilder("Showing ").append(polygon.name()).append(" for ").append(owner.name()).append(". It hides after 3 minutes.");
+		StringBuilder message = new StringBuilder("Showing ").append(polygon.name()).append(" for ").append(owner.name()).append(" at Y ").append(height).append(". It hides after 3 minutes.");
 		if (!skipped.isEmpty()) {
 			message.append(" Skipped points ");
 			for (int index = 0; index < skipped.size(); index++) {
@@ -559,11 +574,8 @@ public final class MapPolygonCommands {
 	}
 
 	private static int hide(CommandSourceStack source, PolygonVisuals visuals) {
-		ServerPlayer operator = operator(source);
-		if (operator == null) {
-			return 0;
-		}
-		visuals.clearShow(operator.getUUID());
+		ServerPlayer operator = source.getPlayer();
+		visuals.clearShow(operator == null ? PolygonVisuals.CONSOLE_VIEWER : operator.getUUID());
 		source.sendSuccess(() -> Component.literal("Hid the polygon preview."), false);
 		return 1;
 	}
