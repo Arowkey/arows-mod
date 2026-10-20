@@ -47,8 +47,8 @@ public final class MapPolygonCommands {
 	/**
 	 * Every polygon command and {@code /arowsmod reload} require operator permission
 	 * ({@link Permissions#COMMANDS_GAMEMASTER}, level 2). Start, add-point, undo, finish, cancel,
-	 * show without a Y, and edit-point without coordinates need a player position. Show with a Y,
-	 * hide, and the other polygon commands can run from the console.
+	 * show without a Y, and insert-point or edit-point without coordinates need a player position.
+	 * Show with a Y, hide, and the other polygon commands can run from the console.
 	 */
 
 	private static void register(
@@ -150,6 +150,15 @@ public final class MapPolygonCommands {
 										.then(Commands.argument("player", GameProfileArgument.gameProfile())
 												.then(Commands.argument("name", com.mojang.brigadier.arguments.StringArgumentType.word())
 														.then(Commands.argument("index", IntegerArgumentType.integer(1))
+																.executes(context -> insertHere(
+																		context.getSource(),
+																		store,
+																		bridge,
+																		visuals,
+																		profiles(context),
+																		com.mojang.brigadier.arguments.StringArgumentType.getString(context, "name"),
+																		IntegerArgumentType.getInteger(context, "index")
+																))
 																.then(Commands.argument("x", IntegerArgumentType.integer())
 																		.then(Commands.argument("z", IntegerArgumentType.integer())
 																				.executes(context -> insert(
@@ -237,6 +246,7 @@ public final class MapPolygonCommands {
 				+ "undo removes the last point. cancel drops the one in progress.\n"
 				+ "show <player> <name> previews a saved polygon at your Y. show <player> <name> <y> uses that height. The console has to pass <y>.\n"
 				+ "Later: list, list <player> <name>, color, rename, remove, insert-point, edit-point, and remove-point.\n"
+				+ "insert-point and edit-point use your x and z when coordinates are left out. The console has to pass <x> <z>.\n"
 				+ "Colors are six hex digits with no #.\n"
 				+ "More detail: ").append(link);
 		source.sendSuccess(() -> message, false);
@@ -580,6 +590,14 @@ public final class MapPolygonCommands {
 		return 1;
 	}
 
+	private static int insertHere(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, PolygonVisuals visuals, Collection<NameAndId> profiles, String name, int index) {
+		MapPoint point = here(source);
+		if (point == null) {
+			return 0;
+		}
+		return insert(source, store, bridge, visuals, profiles, name, index, point.x(), point.z());
+	}
+
 	private static int insert(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, PolygonVisuals visuals, Collection<NameAndId> profiles, String name, int index, int x, int z) {
 		return changePoints(source, store, bridge, visuals, profiles, name, index, "inserted", points -> {
 			if (index > points.size() + 1) {
@@ -591,12 +609,20 @@ public final class MapPolygonCommands {
 	}
 
 	private static int editHere(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, PolygonVisuals visuals, Collection<NameAndId> profiles, String name, int index) {
-		ServerPlayer operator = operator(source);
-		if (operator == null) {
+		MapPoint point = here(source);
+		if (point == null) {
 			return 0;
 		}
-		Point point = Point.of(source.getPosition().x(), source.getPosition().z());
 		return edit(source, store, bridge, visuals, profiles, name, index, point.x(), point.z());
+	}
+
+	private static MapPoint here(CommandSourceStack source) {
+		if (source.getPlayer() == null) {
+			source.sendFailure(Component.literal("The console has no position, so it must pass <x> <z>."));
+			return null;
+		}
+		Point point = Point.of(source.getPosition().x(), source.getPosition().z());
+		return new MapPoint(point.x(), point.z());
 	}
 
 	private static int edit(CommandSourceStack source, PolygonStore store, Pl3xMapBridge bridge, PolygonVisuals visuals, Collection<NameAndId> profiles, String name, int index, int x, int z) {

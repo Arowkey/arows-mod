@@ -23,7 +23,7 @@ The first start creates `config/arowsmod.json` and, after the first saved polygo
 
 Every ArowsMod command requires operator permission (permission level 2).
 
-`start`, `add-point`, `undo`, `finish`, `cancel`, `show` without a Y, and `edit-point` without coordinates also need a player in a world, because they use that operator's position. The console cannot run those. `show <player> <name> <y>`, `hide`, `list`, `insert-point`, `remove-point`, `edit-point` with coordinates, `remove`, `rename`, `color`, `help`, and `reload` can be run by any level-2 source, including the console. Console `hide` removes the preview the console is showing.
+`start`, `add-point`, `undo`, `finish`, `cancel`, `show` without a Y, and `insert-point` or `edit-point` without coordinates also need a player in a world, because they use that operator's position. The console cannot run those. `show <player> <name> <y>`, `hide`, `list`, `insert-point` and `edit-point` with coordinates, `remove-point`, `remove`, `rename`, `color`, `help`, and `reload` can be run by any level-2 source, including the console. Console `hide` removes the preview the console is showing.
 
 `/arowsmod map polygon help`, or `/arowsmod map polygon` with nothing after it, prints a short reminder in chat and links to this page.
 
@@ -77,9 +77,10 @@ Passing a color on `start` after a color exists is rejected. Change it with `col
 /arowsmod map polygon show Steve spawn
 /arowsmod map polygon show Steve spawn 70
 /arowsmod map polygon hide
+/arowsmod map polygon insert-point Steve spawn 2
 /arowsmod map polygon insert-point Steve spawn 2 100 200
-/arowsmod map polygon edit-point Steve spawn 2 120 200
 /arowsmod map polygon edit-point Steve spawn 2
+/arowsmod map polygon edit-point Steve spawn 2 120 200
 /arowsmod map polygon remove-point Steve spawn 2
 ```
 
@@ -87,7 +88,7 @@ Passing a color on `start` after a color exists is rejected. Change it with `col
 
 `show <player> <name>` draws the same corner and edge displays for a finished polygon, all at your current Y. `show <player> <name> <y>` uses that integer for every corner, edge, and index. The console has to pass `<y>`. Every edge of a shown polygon is light blue, including the edge back to the first point. A point whose chunk is not loaded is skipped, and the command says which indexes were skipped. `hide` removes the preview you are showing. A preview also goes away when you disconnect, when the server stops, when you show a different polygon, and after 3 minutes. These displays are not written into the world.
 
-Point indexes start at 1. `insert-point` puts a new point at that index. An index one past the last point appends. `edit-point` moves a point. Without x and z, it uses your current position. `remove-point` removes a point and refuses to leave fewer than 3. The file is updated only after Pl3xMap accepts the new marker. If that polygon is currently shown, its displays are refreshed. Y is not stored in `polygons.json`.
+Point indexes start at 1. `insert-point` puts a new point at that index. An index one past the last point appends. `edit-point` moves a point. Without x and z, both use your current position. The console has no position, so it must pass `<x> <z>` for both. `remove-point` removes a point and refuses to leave fewer than 3. The file is updated only after Pl3xMap accepts the new marker. If that polygon is currently shown, its displays are refreshed. Y is not stored in `polygons.json`.
 
 ## Saved polygons
 
