@@ -23,7 +23,7 @@ The first start creates `config/arowsmod.json` and, after the first saved polygo
 
 Every ArowsMod command requires operator permission (permission level 2).
 
-`start`, `add`, `finish`, and `cancel` also need a player in a world, because they use that operator's position and dimension. The console cannot run those four. `list`, `remove`, `rename`, `color`, `help`, and `reload` can be run by any level-2 source, including the console.
+`start`, `add`, `undo`, `finish`, `cancel`, `show`, `hide`, and `edit` without coordinates also need a player in a world, because they use that operator's position or the preview belongs to them. The console cannot run those. `list`, `insert`, `delete`, `edit` with coordinates, `remove`, `rename`, `color`, `help`, and `reload` can be run by any level-2 source, including the console.
 
 `/arowsmod map polygon help`, or `/arowsmod map polygon` with nothing after it, prints a short reminder in chat and links to this page.
 
@@ -40,15 +40,23 @@ Stand in the world where the polygon belongs, then:
 /arowsmod map polygon finish spawn
 ```
 
-`add` with no coordinates uses your current x and z. `add <x> <z>` uses those integers. The first point locks the dimension you are in. Later points must be added from that same dimension. A polygon needs at least 3 points.
+`add` with no coordinates uses your current x and z. `add <x> <z>` uses those integers. The marker for a new point sits just above the block at your feet. The first point locks the dimension you are in. Later points must be added from that same dimension. A polygon needs at least 3 points.
 
-`finish <name>` saves the polygon under that name for the player you started it for. The name is one word. That player cannot already have a polygon with the same name, ignoring case. In-progress polygons do not count toward the per-player cap.
+While you are creating a polygon, corners and edges are shown with block displays, including the edge that closes back to the first point. The number at each corner is that point's index, starting at 1. The first corner is lime, the latest corner is orange, and the corners between them are white. Nearby players can see these displays. They are not saved with the world.
+
+```
+/arowsmod map polygon undo
+```
+
+`undo` removes the last point and updates the displays. If that was the only point, the in-progress polygon is cancelled.
+
+`finish <name>` saves the polygon under that name for the player you started it for and removes the in-progress displays. The name is one word. That player cannot already have a polygon with the same name, ignoring case. In-progress polygons do not count toward the per-player cap.
 
 ```
 /arowsmod map polygon cancel
 ```
 
-`cancel` drops your in-progress polygon. It does not remove a finished one.
+`cancel` drops your in-progress polygon and its displays. It does not remove a finished one.
 
 Once Steve already has a color, start the next polygon without one:
 
@@ -62,16 +70,27 @@ Passing a color on `start` after a color exists is rejected. Change it with `col
 
 ```
 /arowsmod map polygon list Steve
+/arowsmod map polygon list Steve spawn
 /arowsmod map polygon color Steve 2266aa
 /arowsmod map polygon rename Steve spawn hub
 /arowsmod map polygon remove Steve hub
+/arowsmod map polygon show Steve spawn
+/arowsmod map polygon hide
+/arowsmod map polygon insert Steve spawn 2 100 200
+/arowsmod map polygon edit Steve spawn 2 120 200
+/arowsmod map polygon edit Steve spawn 2
+/arowsmod map polygon delete Steve spawn 2
 ```
 
-`list` prints that player's finished polygons. `color` stores the new color and restyles every finished polygon for that player. `rename` matches the old name without regard to case. The new name must not already belong to a different polygon for that player. The rename is saved only after Pl3xMap replaces the marker. `remove` deletes the saved polygon and its marker. `remove` and `rename` also match the existing name without regard to case.
+`list <player>` prints that player's finished polygons. `list <player> <name>` prints each saved point as `1: x, z`. `color` stores the new color and restyles every finished polygon for that player. `rename` matches the old name without regard to case. The new name must not already belong to a different polygon for that player. The rename is saved only after Pl3xMap replaces the marker. `remove` deletes the saved polygon and its marker. `remove` and `rename` also match the existing name without regard to case.
+
+`show` draws the same corner and edge displays for a finished polygon. Each marker uses the top solid block at that x,z, plus one. A point whose chunk is not loaded is skipped, and the command says which indexes were skipped. `hide` removes the preview you are showing. A preview also goes away when you disconnect, when the server stops, when you show a different polygon, and after 3 minutes. These displays are not written into the world.
+
+Point indexes start at 1. `insert` puts a new point at that index. An index one past the last point appends. `edit` moves a point. Without x and z, it uses your current position. `delete` removes a point and refuses to leave fewer than 3. The file is updated only after Pl3xMap accepts the new marker. If that polygon is currently shown, its displays are refreshed. Y is not stored in `polygons.json`.
 
 ## Saved polygons
 
-Finished polygons and player colors are stored in `config/arowsmod/polygons.json`. In-progress polygons are kept in memory only and are not written to that file.
+Finished polygons and player colors are stored in `config/arowsmod/polygons.json`. Only x and z are stored. In-progress polygons, their feet height, and the in-world previews are kept in memory only.
 
 There is no global default color in the config. A player's color is set by `start` or `color` and stored with their polygons.
 

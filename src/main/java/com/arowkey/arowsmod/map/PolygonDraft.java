@@ -9,7 +9,7 @@ public final class PolygonDraft {
 	private final String ownerName;
 	private final String worldId;
 	private String color;
-	private final List<MapPoint> points = new ArrayList<>();
+	private final List<DraftPoint> points = new ArrayList<>();
 
 	public PolygonDraft(UUID ownerId, String ownerName, String worldId, String color) {
 		this.ownerId = ownerId;
@@ -38,12 +38,24 @@ public final class PolygonDraft {
 		this.color = color;
 	}
 
-	public List<MapPoint> points() {
+	public List<DraftPoint> points() {
 		return List.copyOf(this.points);
 	}
 
-	public void add(MapPoint point) {
+	public List<MapPoint> mapPoints() {
+		List<MapPoint> mapPoints = new ArrayList<>();
+		for (DraftPoint point : this.points) {
+			mapPoints.add(point.toMapPoint());
+		}
+		return List.copyOf(mapPoints);
+	}
+
+	public void add(DraftPoint point) {
 		this.points.add(point);
+	}
+
+	public void removeLast() {
+		this.points.remove(this.points.size() - 1);
 	}
 
 	public int size() {
