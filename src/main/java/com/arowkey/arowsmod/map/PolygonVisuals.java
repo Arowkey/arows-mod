@@ -338,6 +338,8 @@ public final class PolygonVisuals {
 		if (!level.getChunkSource().hasChunk(chunkX, chunkZ)) {
 			return Placed.failed("the chunk for the " + kind + " display is not loaded");
 		}
+		// Scoreboard tag arowsmod. Leftovers: /kill @e[type=block_display,tag=arowsmod] and /kill @e[type=text_display,tag=arowsmod].
+		display.addTag("arowsmod");
 		if (!level.addFreshEntity(display)) {
 			return Placed.failed("the world did not add the " + kind + " display");
 		}
