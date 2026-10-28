@@ -2,7 +2,6 @@ package com.arowkey.arowsmod.map;
 
 import com.arowkey.arowsmod.ArowsMod;
 import com.mojang.math.Transformation;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -19,12 +18,12 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.entity.Display;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.world.level.storage.ValueInput;
@@ -44,7 +43,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * Block and text displays for a polygon an operator is drawing or has asked to see.
  * A draft uses the feet height stored with each point. show uses one Y for every marker.
  * The edge back to the first point is magenta concrete only while the polygon is in progress.
- * Displays are discarded instead of saved, including when their chunk unloads.
+ * Displays are not saved with the world. Unloading their chunk leaves the same markers tracked,
+ * so hide, cancel, finish, disconnect, server stop, and the 3-minute timeout can still remove them
+ * after that chunk loads again.
  */
 public final class PolygonVisuals {
 	/** Viewer id for a preview started from the server console. */
@@ -68,7 +69,6 @@ public final class PolygonVisuals {
 		});
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> this.clearAll());
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> this.clearOperator(handler.getPlayer().getUUID()));
-		ServerChunkEvents.CHUNK_UNLOAD.register(this::discardInChunk);
 	}
 
 	public void showDraft(ServerPlayer operator, PolygonDraft draft) {
@@ -193,30 +193,6 @@ public final class PolygonVisuals {
 		}
 	}
 
-	private void discardInChunk(ServerLevel level, LevelChunk chunk) {
-		int chunkX = chunk.getPos().x();
-		int chunkZ = chunk.getPos().z();
-		for (List<Display> entities : this.drafts.values()) {
-			discardInChunk(entities, level, chunkX, chunkZ);
-		}
-		for (Shown shown : this.shows.values()) {
-			discardInChunk(shown.entities, level, chunkX, chunkZ);
-		}
-	}
-
-	private static void discardInChunk(List<Display> entities, ServerLevel level, int chunkX, int chunkZ) {
-		Iterator<Display> iterator = entities.iterator();
-		while (iterator.hasNext()) {
-			Display entity = iterator.next();
-			if (entity.level() == level && entity.chunkPosition().x() == chunkX && entity.chunkPosition().z() == chunkZ) {
-				if (!entity.isRemoved()) {
-					entity.discard();
-				}
-				iterator.remove();
-			}
-		}
-	}
-
 	private List<Display> spawn(ServerLevel level, List<MarkerPoint> points, boolean closingEdge) {
 		List<Display> entities = new ArrayList<>();
 		String failure = null;
@@ -308,7 +284,7 @@ public final class PolygonVisuals {
 		if (state.isAir()) {
 			return Placed.failed("the block display has no block");
 		}
-		Display.BlockDisplay display = new Display.BlockDisplay(EntityTypes.BLOCK_DISPLAY, level);
+		Display.BlockDisplay display = new UnsavedBlockDisplay(level);
 		TagValueOutput output = displayData(level.registryAccess(), x, y, z, transformation);
 		output.store("block_state", BlockState.CODEC, state);
 		return place(level, display, x, y, z, output.buildResult(), "block");
@@ -320,7 +296,7 @@ public final class PolygonVisuals {
 		if (scale != null) {
 			return Placed.failed(scale);
 		}
-		Display.TextDisplay display = new Display.TextDisplay(EntityTypes.TEXT_DISPLAY, level);
+		Display.TextDisplay display = new UnsavedTextDisplay(level);
 		TagValueOutput output = displayData(level.registryAccess(), x, y, z, transformation);
 		output.store("text", ComponentSerialization.CODEC, Component.literal(text));
 		output.store("billboard", Display.BillboardConstraints.CODEC, Display.BillboardConstraints.CENTER);
@@ -415,11 +391,23 @@ public final class PolygonVisuals {
 			return;
 		}
 		for (Display entity : entities) {
-			if (!entity.isRemoved()) {
-				entity.discard();
-			}
+			discard(entity);
 		}
 		entities.clear();
+	}
+
+	/**
+	 * Drops the tracked marker. When a chunk reload restored another entity with the same id, that copy is dropped too.
+	 */
+	private static void discard(Display entity) {
+		if (!entity.isRemoved()) {
+			entity.discard();
+			return;
+		}
+		Entity loaded = entity.level().getEntity(entity.getUUID());
+		if (loaded instanceof Display display && !display.isRemoved()) {
+			display.discard();
+		}
 	}
 
 	private static ServerLevel level(MinecraftServer server, String worldId) {
@@ -433,6 +421,30 @@ public final class PolygonVisuals {
 	}
 
 	private record MarkerPoint(int x, int y, int z) {
+	}
+
+	/** A corner or edge marker. {@link #shouldBeSaved()} is false so a chunk unload cannot write it. */
+	private static final class UnsavedBlockDisplay extends Display.BlockDisplay {
+		private UnsavedBlockDisplay(ServerLevel level) {
+			super(EntityTypes.BLOCK_DISPLAY, level);
+		}
+
+		@Override
+		public boolean shouldBeSaved() {
+			return false;
+		}
+	}
+
+	/** An index marker. {@link #shouldBeSaved()} is false so a chunk unload cannot write it. */
+	private static final class UnsavedTextDisplay extends Display.TextDisplay {
+		private UnsavedTextDisplay(ServerLevel level) {
+			super(EntityTypes.TEXT_DISPLAY, level);
+		}
+
+		@Override
+		public boolean shouldBeSaved() {
+			return false;
+		}
 	}
 
 	/** A display that was added, a spawn that was not attempted, or the reason nothing was added. */
